@@ -23,7 +23,17 @@ python3 harness/run_eval.py --submission . --eval eval/public_eval.jsonl
 python3 harness/run_eval.py --submission . --snapshots /path/to/snapshots --eval eval/public_eval.jsonl
 ```
 
-Optional: `export OPENAI_API_KEY=...` before eval for LLM fallback (paid API; see NOTES.md).
+**With OpenAI (recommended for accuracy):**
+
+```bash
+export OPENAI_API_KEY=your_key
+export OPENAI_MODEL=gpt-4o-mini   # optional
+export KB_LOG_LLM=1               # optional: print per-question LLM latency to stderr
+python3 harness/run_eval.py --submission . --snapshots /path/to/snapshots --eval eval/public_eval.jsonl
+python3 harness/run_eval.py --submission . --snapshots /path/to/snapshots --eval eval/holdout_eval.jsonl
+```
+
+Per-question latency is always written to `results/per_question.jsonl` by the harness. Without `OPENAI_API_KEY`, a deterministic evidence-only path is used (lower accuracy; see NOTES.md).
 
 Run unit tests:
 
@@ -43,15 +53,15 @@ pytest tests/
 
 ## Design
 
-- **Ingest:** Walk each snapshot; extract markdown table rows as structured facts; chunk pages for BM25; track full URL history for `as_of`.
-- **Answer:** Ordered specialized handlers (rates, branches, refusals, URLs, …) → BM25 retrieval over authoritative chunks → optional OpenAI completion strictly from evidence.
+- **Ingest:** Walk each snapshot; extract markdown table rows as structured facts; chunk pages; track full URL history for `as_of`.
+- **Answer:** Build evidence (facts + BM25 chunks for the active `as_of`) → OpenAI JSON answer with citations → staleness post-check. No-key: compose from top facts or abstain.
 - **Conflicts:** Numeric disagreements on high-authority table facts, resolved to newest snapshot.
 
 ## Tradeoffs
 
-- Handlers tuned to the public eval improve accuracy and speed but add maintenance; retrieval-only would generalize better with an always-on LLM.
-- BM25 index is built from the **latest** corpus; historical `as_of` questions rely on handlers and page replay, not re-indexing every date.
-- Without `OPENAI_API_KEY`, list-style questions with empty `must_include` in the scorer (e.g. “all certificate rates”) score 0 on correctness by harness rules even when the answer lists rates.
+- Accuracy on the public set **requires** the LLM path in practice; the no-key path is for CI and offline dev only.
+- Per-`as_of` BM25 indexes are built lazily and cached inside a run.
+- Public eval item `dup-005` has empty `must_include` in the harness (correctness 0 without `--judge` even with a full rate list).
 
 ## With more time
 

@@ -42,6 +42,9 @@ class KnowledgeStore:
     chunks: list[ChunkRecord] = field(default_factory=list)
     _chunk_tokens: list[list[str]] = field(default_factory=list)
     _bm25: BM25Index | None = None
+    _bm25_by_asof: dict[str, tuple[list[ChunkRecord], BM25Index]] = field(
+        default_factory=dict
+    )
     _conflicts_raw: list[dict] | None = None
     _finalized: bool = False
 
@@ -138,20 +141,51 @@ class KnowledgeStore:
             return None
         return max(matches, key=lambda p: (p.authority, p.taken_on))
 
-    def search(self, query: str, as_of: str | None, top_k: int = 6) -> list[ChunkRecord]:
+    def _asof_key(self, as_of: str | None) -> str:
+        return self._cutoff(as_of) or "latest"
+
+    def _build_bm25_for(self, as_of: str | None) -> tuple[list[ChunkRecord], BM25Index]:
+        corpus = self.corpus_as_of(as_of, for_rates=False)
+        chunks: list[ChunkRecord] = []
+        tokens: list[list[str]] = []
+        cid = 0
+        for page in corpus:
+            for ch in split_chunks(page.markdown):
+                text = clean_markdown(ch)
+                if len(text) < 40:
+                    continue
+                chunks.append(
+                    ChunkRecord(
+                        chunk_id=cid,
+                        text=text,
+                        url=page.url,
+                        snapshot_id=page.snapshot_id,
+                        taken_on=page.taken_on,
+                        authority=page.authority,
+                        stale_for_rates=page.stale_for_rates,
+                    )
+                )
+                tokens.append(tokenize(text))
+                cid += 1
+        return chunks, BM25Index(tokens)
+
+    def search_as_of(
+        self, query: str, as_of: str | None, top_k: int = 8
+    ) -> list[tuple[ChunkRecord, float]]:
         self.finalize()
-        assert self._bm25 is not None
-        cutoff = self._cutoff(as_of)
-        hits = self._bm25.query(query, top_k=top_k * 3)
-        out: list[ChunkRecord] = []
+        key = self._asof_key(as_of)
+        if key not in self._bm25_by_asof:
+            self._bm25_by_asof[key] = self._build_bm25_for(as_of)
+        chunks, bm25 = self._bm25_by_asof[key]
+        hits = bm25.query(query, top_k=top_k)
+        out: list[tuple[ChunkRecord, float]] = []
         for h in hits:
-            ch = self.chunks[h.chunk_id]
-            if cutoff and ch.taken_on > cutoff:
-                continue
-            out.append(ch)
-            if len(out) >= top_k:
-                break
+            if h.chunk_id < len(chunks):
+                out.append((chunks[h.chunk_id], h.score))
         return out
+
+    def search(self, query: str, as_of: str | None, top_k: int = 6) -> list[ChunkRecord]:
+        return [c for c, _ in self.search_as_of(query, as_of, top_k=top_k)]
 
     def _facts_as_of(self, as_of: str | None) -> list[ExtractedFact]:
         cutoff = self._cutoff(as_of)
@@ -164,6 +198,9 @@ class KnowledgeStore:
             key = (f.url, f.subject, f.field, f.value)
             by_key[key] = f
         return list(by_key.values())
+
+    def facts_as_of_ranked(self, as_of: str | None) -> list[ExtractedFact]:
+        return self._facts_as_of(as_of)
 
     def facts_matching(
         self, as_of: str | None, subject_contains: str = "", url_fragment: str = ""

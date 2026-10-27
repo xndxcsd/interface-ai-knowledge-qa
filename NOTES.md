@@ -11,6 +11,14 @@
 
 `conflicts()` groups extracted table facts from high-authority pages where the same subject + column shows **different numeric values** across sources/snapshots. Resolution prefers the value from the **newest snapshot** on the official product URL, with a short reason string.
 
+## Architecture (v2 — generalization)
+
+- **No per-question or per-eval-ID handlers.** Removed all product-specific `handle_*` routing tied to public eval wording.
+- **Evidence pack:** BM25 over the correct `as_of` corpus + ranked structured table facts, with general keyword→canonical path hints (e.g. “certificate” → savings rate page).
+- **Primary answerer:** OpenAI chat (`OPENAI_MODEL`, default `gpt-4o-mini`) reading a tight evidence block; JSON `{text, source_urls, confident}`; LRU cache keyed by model+prompt for repeat/consistency.
+- **Post-check:** Rate answers reject values that appear only on stale/low-authority evidence.
+- **No-key fallback:** Composes short answers from top authoritative facts/snippets or abstains when evidence score is low.
+
 ## API keys
 
 | Variable | Required | Purpose |
