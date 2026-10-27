@@ -6,28 +6,13 @@ from urllib.parse import urlparse
 
 from contract import Answer
 
-from kb.evidence import EvidencePack, FactEvidence, is_rate_question
-from kb.facts import ExtractedFact
-from kb.retrieval_hints import is_hours_question, is_list_question
+from kb.evidence import EvidencePack, FactEvidence
+from kb.patterns import US_PHONE as PHONE
+from kb.places import named_places, newsroom_place_match
+from kb.retrieval_hints import is_hours_question, is_list_question, is_rate_question
 from kb.textutil import has_any_word, has_word
 
-
-def _newsroom_place_match(fact: ExtractedFact, place: str) -> bool:
-    p = place.lower()
-    blob = f"{fact.subject} {fact.section} {fact.value}".lower()
-    if f.section.lower().startswith("article-places:"):
-        tags = f.section.split(":", 1)[1].lower()
-        if p in tags or p.replace("-", " ") in tags:
-            return True
-    if has_word(blob, p) or p.replace("-", " ") in blob:
-        return True
-    head = fact.subject.split("|", 1)[0].strip().lower()
-    return p == head or p.replace("-", " ") == head
-
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
-PHONE = re.compile(
-    r"\b(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b"
-)
 URL_RE = re.compile(
     r"(?:https?://[^\s\])\"']+|(?:[a-z0-9-]+\.)+dupaco\.com[^\s\])\"']*)",
     re.I,
@@ -41,21 +26,6 @@ STREET = re.compile(
 )
 ZIP = re.compile(r"\b\d{5}\b")
 REFUSAL = "I don't know."
-
-GENERIC = frozenset(
-    {
-        "what", "the", "is", "are", "do", "does", "for", "on", "to", "you", "your",
-        "dupaco", "rate", "rates", "loan", "loans", "account", "current", "right",
-        "now", "tell", "give", "provide", "much", "many", "any", "can", "could",
-        "branch", "street", "address", "hours", "lobby", "drive", "main", "named",
-    }
-)
-PLACE_SKIP = GENERIC | frozenset(
-    {
-        "which", "every", "specific", "typical", "general", "exact", "store",
-        "through", "branches", "lobby", "avenue",
-    }
-)
 
 
 def _numbers(text: str) -> set[tuple[str, float]]:
@@ -249,34 +219,6 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
     return False
 
 
-def _named_places(question: str) -> list[str]:
-    q = re.sub(r"\bDupaco(?:'s)\b", "", question)
-    raw: list[str] = []
-    for m in re.finditer(r"\b([A-Z][A-Za-z]+(?:-[A-Z][A-Za-z]+)+)\b", q):
-        raw.append(m.group(1))
-    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+),\s*([A-Z]{2}|[A-Z][a-z]+)\b", q):
-        raw.append(m.group(1))
-    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+)\s+[Bb]ranch\b", q):
-        if m.start() >= 2 and q[m.start() - 2 : m.start()] == ", ":
-            continue
-        raw.append(m.group(1))
-    for m in re.finditer(r"\bnamed\s+([A-Z][A-Za-z'\-]+)\b", q):
-        raw.append(m.group(1))
-    for m in re.finditer(
-        r"(?:branch|lobby|hours)\s+(?:for|at|on)\s+(?:the\s+)?([A-Z][A-Za-z'\-]{3,})\b",
-        q,
-    ):
-        raw.append(m.group(1))
-    out: list[str] = []
-    for p in raw:
-        key = p.lower()
-        if key in PLACE_SKIP or key == "dupaco" or len(key) < 3:
-            continue
-        if key not in out:
-            out.append(key)
-    return out
-
-
 def _place_in_corpus(place: str, corpus: str) -> bool:
     return place in corpus or place.replace("-", " ") in corpus
 
@@ -298,7 +240,7 @@ def _branch_hours_for_place(place: str, pack: EvidencePack) -> bool:
         if fe.fact.field.lower() != "hours":
             continue
         url = fe.fact.url.lower()
-        if "/newsroom/" in url and not _newsroom_place_match(fe.fact, p):
+        if "/newsroom/" in url and not newsroom_place_match(fe.fact, p):
             continue
         blob = f"{fe.fact.subject} {fe.fact.value}".lower()
         if p in blob or has_word(blob, p):
@@ -329,7 +271,7 @@ def _adjust_branch_hours_answer(
 ) -> Answer:
     if not is_hours_question(question) or not answer.confident:
         return answer
-    places = _named_places(question)
+    places = named_places(question)
     if len(places) != 1:
         return answer
     place = places[0]
@@ -354,7 +296,7 @@ def _unknown_place_in_question(question: str, pack: EvidencePack) -> bool:
         ("branch", "lobby", "hours", "address", "street", "avenue", "named"),
     ):
         return False
-    places = _named_places(question)
+    places = named_places(question)
     if not places:
         return False
     corpus = _location_corpus(pack)

@@ -5,46 +5,29 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from typing import Protocol
+from typing import Any
 
 LLM_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "15"))
+_DEFAULT_MAX_TOKENS = 768
+
+_openai_client: Any | None = None
 
 
-class ChatClient(Protocol):
-    def complete(self, system: str, user: str) -> str: ...
-
-
-class OpenAIChatClient:
-    def __init__(self, model: str | None = None):
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
         from openai import OpenAI
 
-        self._client = OpenAI(
+        _openai_client = OpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
             timeout=LLM_TIMEOUT_S,
             max_retries=0,
         )
-        self._model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-    def complete(self, system: str, user: str) -> str:
-        resp = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0,
-            max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "320")),
-        )
-        return (resp.choices[0].message.content or "").strip()
+    return _openai_client
 
 
-def get_llm_client() -> ChatClient | None:
-    if not os.getenv("OPENAI_API_KEY"):
-        return None
-    try:
-        return OpenAIChatClient()
-    except Exception:
-        return None
+def llm_configured() -> bool:
+    return bool(os.getenv("OPENAI_API_KEY"))
 
 
 SYSTEM_PROMPT = """You answer member questions using ONLY the evidence block.
@@ -60,8 +43,7 @@ Rules:
 - If asked for a specific branch's hours and evidence only shows general hours, say branch-specific hours are not listed and label any general schedule as general—not that branch's.
 - If the evidence does not contain the answer, set confident=false and say you don't know.
 
-JSON only:
-{"text":"...", "source_urls":["https://..."], "confident":true|false}"""
+Respond with JSON: {"text":"...", "source_urls":["https://..."], "confident":true|false}"""
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -80,8 +62,18 @@ def _llm_call_once(question: str, evidence_block: str, as_of: str | None) -> dic
     )
     user = f"{as_of_line}\n\nQuestion: {question}\n\n{evidence_block}"
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    client = OpenAIChatClient(model=model)
-    raw = client.complete(SYSTEM_PROMPT, user)
+    client = _get_openai_client()
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        temperature=0,
+        max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", str(_DEFAULT_MAX_TOKENS))),
+        response_format={"type": "json_object"},
+    )
+    raw = (resp.choices[0].message.content or "").strip()
     return _parse_llm_json(raw)
 
 

@@ -9,13 +9,6 @@ EFFECTIVE_RE = re.compile(
     re.I,
 )
 
-STALE_PATH_MARKERS = (
-    "/calculators/",
-    "info.dupaco.com",
-    "/learn/blog/",
-    "/wp-content/",
-)
-
 RATE_CANONICAL_PATHS = (
     "/personal/savings-account",
     "/personal/checking-accounts",

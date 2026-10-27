@@ -3,48 +3,53 @@ from __future__ import annotations
 
 import re
 
-
-def _has(q: str, word: str) -> bool:
-    return re.search(rf"\b{re.escape(word)}\b", q, re.I) is not None
-
-
-def _has_any(q: str, words: tuple[str, ...]) -> bool:
-    return any(_has(q, w) for w in words)
+from kb.textutil import has_any_word, has_word
 
 
 def is_list_question(question: str) -> bool:
     q = question.lower()
     if re.search(r"\bcredit\s+cards?\b", q):
         return True
-    if _has(q, "card") and _has_any(
+    if has_word(q, "card") and has_any_word(
         q, ("list", "each", "every", "all", "both", "types", "which", "what", "offer")
     ):
         return True
-    if " and " in q and _has_any(q, ("card", "certificate", "account", "loan", "visa")):
+    if " and " in q and has_any_word(q, ("card", "certificate", "account", "loan", "visa")):
         return True
-    return _has_any(q, ("list", "each", "every", "all", "both", "types")) and _has_any(
+    return has_any_word(q, ("list", "each", "every", "all", "both", "types")) and has_any_word(
         q, ("card", "certificate", "rate", "loan", "visa", "apy", "apr")
     )
 
 
 def is_broad_rate_question(question: str) -> bool:
     q = question.lower()
-    return _has_any(q, ("rates", "rate sheet")) and _has_any(
+    return has_any_word(q, ("rates", "rate sheet")) and has_any_word(
         q, ("mortgage", "certificate", "checking", "savings", "loan", "credit")
     )
 
 
 def is_hours_question(question: str) -> bool:
     q = question.lower()
-    return _has_any(q, ("hour", "hours", "open", "close")) and _has_any(
+    return has_any_word(q, ("hour", "hours", "open", "close")) and has_any_word(
         q, ("lobby", "drive", "branch")
     )
+
+
+def is_rate_question(question: str) -> bool:
+    if has_any_word(
+        question,
+        ("rate", "rates", "apy", "apr", "dividend", "interest", "yield", "percent"),
+    ):
+        return True
+    if has_word(question, "cd") or has_word(question, "certificate"):
+        return True
+    return "%" in question
 
 
 def canonical_path_hints(question: str) -> list[str]:
     q = question.lower()
     hints: list[str] = []
-    if _has(q, "card") or re.search(r"\bvisa\b", q):
+    if has_word(q, "card") or re.search(r"\bvisa\b", q):
         hints.extend(["personal/credit-cards", "business/credit-cards"])
     pairs = (
         (("certificate", "cd"), "personal/savings-account"),
@@ -59,13 +64,13 @@ def canonical_path_hints(question: str) -> list[str]:
         (("savings",), "personal/savings-account"),
     )
     for keys, path in pairs:
-        if _has_any(q, keys):
+        if has_any_word(q, keys):
             hints.append(path)
     if re.search(r"\bpersonal\s+loans?\b", q):
         hints.append("personal/loans/personal-loans")
-    if _has(q, "money") and _has(q, "market"):
+    if has_word(q, "money") and has_word(q, "market"):
         hints.append("personal/savings-account")
-    if _has(q, "rv"):
+    if has_word(q, "rv"):
         hints.append("personal/loans/recreational-loans")
     seen: set[str] = set()
     out: list[str] = []
@@ -77,12 +82,11 @@ def canonical_path_hints(question: str) -> list[str]:
 
 
 def expand_list_path_hints(path_hints: list[str], question: str) -> list[str]:
-    """For list questions, include every page in a product family (e.g. both card pages)."""
     if not is_list_question(question):
         return path_hints
     q = question.lower()
     hints = list(path_hints)
-    if _has(q, "card") or _has(q, "visa") or re.search(r"\bcredit\s+cards?\b", q):
+    if has_word(q, "card") or has_word(q, "visa") or re.search(r"\bcredit\s+cards?\b", q):
         for p in ("personal/credit-cards", "business/credit-cards"):
             if p not in hints:
                 hints.append(p)

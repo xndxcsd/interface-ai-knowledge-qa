@@ -1,7 +1,7 @@
 """Regression: URL token matching uses whole path segments, not substrings."""
 
 from kb.authority import normalize_url
-from kb.evidence import _hint_path_score, gather_evidence
+from kb.evidence import gather_evidence, hint_path_score
 from kb.facts import ExtractedFact
 from kb.system import KnowledgeStore, PageVersion
 
@@ -9,9 +9,9 @@ from kb.system import KnowledgeStore, PageVersion
 def test_hint_path_score_does_not_match_rate_inside_celebrate():
     url = "https://www.example.com/newsroom/dupaco-celebrates-branch-opening"
     q_tokens = {"rate", "dividend", "checking", "free"}
-    score_celebrate = _hint_path_score("personal/checking-accounts", url, q_tokens)
+    score_celebrate = hint_path_score("personal/checking-accounts", url, q_tokens)
     url_product = "https://www.example.com/personal/checking-accounts/free-checking"
-    score_product = _hint_path_score("personal/checking-accounts", url_product, q_tokens)
+    score_product = hint_path_score("personal/checking-accounts", url_product, q_tokens)
     assert score_product > score_celebrate
     assert score_celebrate == 0
 

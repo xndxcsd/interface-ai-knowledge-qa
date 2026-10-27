@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import re
 
-from kb.article_places import infer_article_places, primary_place_tag, subject_with_place
+from kb.article_places import infer_article_places, subject_with_place
+from kb.markdown_ctx import nearest_heading
 from kb.facts import ExtractedFact
 from kb.textutil import strip_non_content
 
@@ -22,18 +23,6 @@ HOURS_CONTEXT = re.compile(
     r"drive[- ]?up|lobby hours|branch hours|drive up window|operating hours",
     re.I,
 )
-HEAD = re.compile(r"^#{1,4}\s+(.+)$", re.M)
-
-
-def _section(md: str, pos: int) -> str:
-    title = "Hours"
-    for m in HEAD.finditer(md[:pos]):
-        t = m.group(1).strip()
-        if len(t) > 2:
-            title = t
-    return title
-
-
 def extract_hours_facts(
     markdown: str,
     *,
@@ -50,8 +39,8 @@ def extract_hours_facts(
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
     newsroom = "/newsroom/" in (url or "").lower()
-    place_tag = primary_place_tag(page_title, md) if newsroom else ""
     place_tags = infer_article_places(page_title, md) if newsroom else []
+    place_tag = place_tags[0] if place_tags else ""
 
     def add(label: str, value: str, raw: str, section: str) -> None:
         val = re.sub(r"\s+", " ", value).strip()
@@ -87,10 +76,10 @@ def extract_hours_facts(
 
     for m in LABELED.finditer(md):
         label = m.group(1).strip()
-        add(label, m.group(2), m.group(0), _section(md, m.start()))
+        add(label, m.group(2), m.group(0), nearest_heading(md, m.start(), default="Hours"))
 
     if HOURS_CONTEXT.search(md):
         for m in TIME_RANGE.finditer(md):
-            add("Schedule", m.group(0), m.group(0), _section(md, m.start()))
+            add("Schedule", m.group(0), m.group(0), nearest_heading(md, m.start(), default="Hours"))
 
     return facts

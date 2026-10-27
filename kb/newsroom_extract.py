@@ -3,15 +3,17 @@ from __future__ import annotations
 
 import re
 
-from kb.article_places import infer_article_places, primary_place_tag, subject_with_place
+from kb.article_places import infer_article_places, subject_with_place
 from kb.facts import ExtractedFact
+from kb.patterns import US_PHONE
 from kb.textutil import strip_non_content
 
-US_PHONE = re.compile(
-    r"\b(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b"
-)
 SQ_FT = re.compile(
     r"\b([\d,]{3,7})\s*(?:square\s+feet|sq\.?\s*ft\.?)\b",
+    re.I,
+)
+SQ_FT_HYPHEN = re.compile(
+    r"\b([\d,]{3,7})[\-\s]+square[\-\s]+foot\b",
     re.I,
 )
 
@@ -30,8 +32,8 @@ def extract_newsroom_facts(
     md = strip_non_content(markdown or "")
     if not md:
         return []
-    place = primary_place_tag(page_title, md)
     tags = infer_article_places(page_title, md)
+    place = tags[0] if tags else ""
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
 
@@ -56,16 +58,16 @@ def extract_newsroom_facts(
         )
 
     for m in US_PHONE.finditer(md):
-        phone = m.group(0)
-        add(subject_with_place(place, "phone"), "phone", phone, phone)
+        add(subject_with_place(place, "phone"), "phone", m.group(0), m.group(0))
 
-    for m in SQ_FT.finditer(md):
-        val = re.sub(r",", "", m.group(1))
-        add(
-            subject_with_place(place, "facility size"),
-            "square feet",
-            f"{val} sq ft",
-            m.group(0),
-        )
+    for pat in (SQ_FT, SQ_FT_HYPHEN):
+        for m in pat.finditer(md):
+            val = re.sub(r",", "", m.group(1))
+            add(
+                subject_with_place(place, "facility size"),
+                "square feet",
+                f"{val} sq ft",
+                m.group(0),
+            )
 
     return facts

@@ -4,6 +4,17 @@ from __future__ import annotations
 import re
 
 WORD = re.compile(r"[a-z0-9$%.]+", re.I)
+
+QUERY_STOPWORDS = frozenset(
+    {
+        "what", "the", "is", "are", "do", "does", "a", "an", "for", "on", "to",
+        "you", "your", "me", "tell", "can", "how", "when", "where", "dupaco",
+        "s", "i", "and", "or", "of", "in", "at", "be", "any", "our", "their",
+        "give", "provide", "much", "many", "could", "branch", "street", "address",
+        "hours", "lobby", "drive", "main", "named", "rate", "rates", "loan", "loans",
+        "account", "current", "right", "now",
+    }
+)
 IMG_LINK = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 LINK = re.compile(r"\[([^\]]*)\]\([^)]+\)")
 HTML = re.compile(r"<[^>]+>")
@@ -38,6 +49,11 @@ def tokenize(text: str) -> list[str]:
     return WORD.findall(text.lower())
 
 
+def question_tokens(question: str) -> set[str]:
+    toks = set(tokenize(question))
+    return {t for t in toks if t not in QUERY_STOPWORDS and len(t) > 1}
+
+
 def has_word(text: str, word: str) -> bool:
     return re.search(rf"\b{re.escape(word)}\b", text, re.I) is not None
 
@@ -57,13 +73,6 @@ def url_path_segments(url: str) -> set[str]:
         if len(part) > 1:
             segs.add(part)
     return segs
-
-
-def url_has_segment(url: str, token: str) -> bool:
-    t = token.lower().rstrip("%")
-    if len(t) <= 2:
-        return False
-    return t in url_path_segments(url)
 
 
 def hint_matches_url(path_hint: str, url: str) -> bool:

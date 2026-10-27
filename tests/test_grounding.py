@@ -110,7 +110,7 @@ def test_refuses_unknown_branch_hours():
         facts=[
             FactEvidence(
                 ExtractedFact(
-                    subject="Galena Branch",
+                    subject="Riverside Branch",
                     field="hours",
                     value="Lobby 9 a.m.–5 p.m.",
                     raw_row="",
@@ -135,18 +135,18 @@ def test_refuses_unknown_branch_hours():
     out = apply_grounding(
         ans,
         pack,
-        "What are the lobby hours at the branch named Mullan?",
+        "What are the lobby hours at the branch named Oakridge?",
     )
     assert not out.confident
     assert out.text == "I don't know."
 
 
-def test_galena_branch_not_false_refusal():
+def test_named_branch_hours_not_false_refusal():
     pack = EvidencePack(
         facts=[
             FactEvidence(
                 ExtractedFact(
-                    subject="Galena Branch",
+                    subject="Riverside Branch",
                     field="hours",
                     value="Lobby 9 a.m.–5 p.m.",
                     raw_row="",
@@ -167,7 +167,7 @@ def test_galena_branch_not_false_refusal():
     out = apply_grounding(
         ans,
         pack,
-        "What are the lobby hours at the Galena, Illinois branch?",
+        "What are the lobby hours at the Riverside branch?",
     )
     assert out.confident
 

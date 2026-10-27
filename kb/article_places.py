@@ -1,4 +1,4 @@
-"""Infer branch/city tags from newsroom article title and lead (generic patterns)."""
+"""Infer branch/city tags from newsroom article title and lead."""
 from __future__ import annotations
 
 import re
@@ -12,20 +12,19 @@ PLACE_STOP = frozenset(
         "news", "room", "article", "branch", "location", "member", "members",
         "street", "avenue", "road", "drive", "lane", "highway", "north", "south",
         "east", "west", "downtown", "area", "local", "team", "staff",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     }
 )
 
 BRANCH_IN_TITLE = re.compile(
-    r"\b([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)\s+[Bb]ranch\b"
+    r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+[Bb]ranch\b"
 )
 DATELINE = re.compile(
-    r"\b([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?),\s*([A-Z][a-z]{3,})\b"
+    r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z][a-z]{3,})\b"
 )
 IN_CITY = re.compile(
-    r"\b(?:in|at|for)\s+(?:the\s+)?([A-Za-z][A-Za-z'\-]+(?:\s+[A-Za-z][A-Za-z'\-]+)?)\b",
-    re.I,
+    r"\b(?:in|at|for)\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b"
 )
-SQ_FT_CTX = re.compile(r"\b(?:square\s+feet|sq\.?\s*ft)\b", re.I)
 
 
 def _norm_place(raw: str) -> str | None:
@@ -38,7 +37,6 @@ def _norm_place(raw: str) -> str | None:
 
 
 def infer_article_places(title: str, markdown: str, *, lead_chars: int = 1200) -> list[str]:
-    """Return ordered unique place tags (lowercase) for a newsroom-style article."""
     seen: set[str] = set()
     out: list[str] = []
 
@@ -59,11 +57,6 @@ def infer_article_places(title: str, markdown: str, *, lead_chars: int = 1200) -
         for m in re.finditer(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b", title):
             add(m.group(1))
     return out
-
-
-def primary_place_tag(title: str, markdown: str) -> str:
-    tags = infer_article_places(title, markdown)
-    return tags[0] if tags else ""
 
 
 def subject_with_place(place: str, label: str) -> str:

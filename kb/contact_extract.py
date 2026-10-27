@@ -4,31 +4,20 @@ from __future__ import annotations
 import re
 
 from kb.facts import ExtractedFact
+from kb.markdown_ctx import nearest_heading
+from kb.patterns import US_PHONE
 from kb.textutil import strip_non_content
 
-BRANCH_HEAD = re.compile(r"^#{1,4}\s+(.+)$", re.M)
 ADDRESS = re.compile(
     r"^(\d[\d\sA-Za-z.\'-]+(?:,\s*[A-Za-z.\'\s]+)+,\s*[A-Z]{2},\s*\d{5})\s*$",
     re.M,
 )
 ZIP_IN_ADDR = re.compile(r",\s*(\d{5})\s*$")
-US_PHONE = re.compile(
-    r"\b(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b"
-)
 ROUTING_LABELED = re.compile(
     r"(?:routing\s*(?:number|#)?|aba\s*(?:number|#)?)\s*[:(]?\s*(\d{9})\b",
     re.I,
 )
 ROUTING_BARE = re.compile(r"\b(\d{9})\b")
-
-
-def _nearest_heading(md: str, pos: int) -> str:
-    name = "Location"
-    for m in BRANCH_HEAD.finditer(md[:pos]):
-        title = m.group(1).strip()
-        if len(title) > 2:
-            name = title
-    return name
 
 
 def extract_contact_facts(
@@ -65,7 +54,7 @@ def extract_contact_facts(
 
     for m in ADDRESS.finditer(md):
         addr = re.sub(r"\s+", " ", m.group(1)).strip()
-        heading = _nearest_heading(md, m.start())
+        heading = nearest_heading(md, m.start(), default="Location")
         zm = ZIP_IN_ADDR.search(addr)
         zipc = zm.group(1) if zm else str(m.start())
         subj = f"{heading} — {zipc}"

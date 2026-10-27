@@ -2,7 +2,8 @@ import time
 
 import pytest
 
-from kb.llm import OpenAIChatClient, llm_answer_from_evidence
+from kb import llm as llm_mod
+from kb.llm import llm_answer_from_evidence
 
 
 class FakeCompletion:
@@ -21,36 +22,26 @@ class FakeCompletions:
         return FakeCompletion(self._content)
 
 
-class FakeClient:
+class FakeOpenAI:
     def __init__(self, delay: float = 0.0, **kwargs):
         self.chat = type("Chat", (), {"completions": FakeCompletions(delay=delay)})()
 
 
-def test_openai_client_complete(monkeypatch):
+def test_llm_json_roundtrip(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-
-    import kb.llm as llm_mod
-    import openai
-
-    monkeypatch.setattr(openai, "OpenAI", lambda **kw: FakeClient())
-    monkeypatch.setattr(llm_mod, "OpenAI", lambda **kw: FakeClient(), raising=False)
-    client = OpenAIChatClient(model="gpt-4o-mini")
-    out = client.complete("sys", "user")
-    assert "ok" in out.lower() or "don't" in out.lower()
+    llm_mod._openai_client = None
+    monkeypatch.setattr(llm_mod, "_get_openai_client", lambda: FakeOpenAI())
+    out = llm_answer_from_evidence("q", "evidence", None)
+    assert out.get("confident") is True
 
 
 def test_llm_wall_clock_times_out(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_WALL_S", "0.3")
-
-    import kb.llm as llm_mod
-    import openai
-
-    monkeypatch.setattr(openai, "OpenAI", lambda **kw: FakeClient(delay=8.0))
-    monkeypatch.setattr(llm_mod, "OpenAI", lambda **kw: FakeClient(delay=8.0), raising=False)
+    llm_mod._openai_client = None
+    monkeypatch.setattr(llm_mod, "_get_openai_client", lambda: FakeOpenAI(delay=8.0))
 
     t0 = time.monotonic()
     with pytest.raises(TimeoutError):
         llm_answer_from_evidence("q", "evidence", None)
-    elapsed = time.monotonic() - t0
-    assert elapsed < 0.3 + 1.0
+    assert time.monotonic() - t0 < 0.3 + 1.0

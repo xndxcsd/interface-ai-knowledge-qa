@@ -4,7 +4,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "harness"))
 from contract import Page, Snapshot  # noqa: E402
 
-from kb.evidence import gather_evidence, is_rate_question
+from kb.evidence import gather_evidence
+from kb.retrieval_hints import is_rate_question
 from kb.system import KnowledgeStore
 
 

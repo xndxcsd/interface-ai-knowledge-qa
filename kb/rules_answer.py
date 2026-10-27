@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import re
 
-from kb.evidence import EvidencePack, is_rate_question
+from kb.evidence import EvidencePack
+from kb.retrieval_hints import is_rate_question
 from kb.retrieval_hints import is_list_question
 from kb.textutil import has_word
 

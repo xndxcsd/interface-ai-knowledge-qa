@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from kb.authority import newest_effective_date
+from kb.markdown_ctx import nearest_heading
 from kb.normalize import normalize_value
 
 
@@ -22,9 +23,7 @@ class ExtractedFact:
     authority: float
 
 
-TABLE_ROW = re.compile(r"^\|(.+)\|\s*$", re.M)
 HEADER_SEP = re.compile(r"^\|\s*[-:]+\s*\|", re.M)
-SECTION = re.compile(r"^#{1,4}\s+(.+)$", re.M)
 
 
 def _parse_row(line: str) -> list[str]:
@@ -42,18 +41,6 @@ def extract_table_facts(
 ) -> list[ExtractedFact]:
     md = markdown or ""
     effective = newest_effective_date(md)
-    sections: list[tuple[int, str]] = [(0, "")]
-    for m in SECTION.finditer(md):
-        sections.append((m.start(), m.group(1).strip()))
-    sections.sort()
-
-    def section_at(pos: int) -> str:
-        name = ""
-        for start, title in sections:
-            if start <= pos:
-                name = title
-        return name
-
     facts: list[ExtractedFact] = []
     lines = md.splitlines()
     i = 0
@@ -72,7 +59,7 @@ def extract_table_facts(
             if len(row_cells) >= 2 and row_cells[0] != "---":
                 raw = lines[i]
                 pos = md.find(raw)
-                sec = section_at(pos)
+                sec = nearest_heading(md, pos)
                 subject = row_cells[0]
                 if len(header) > 1 and len(row_cells) > 1:
                     h1 = header[1].lower()
