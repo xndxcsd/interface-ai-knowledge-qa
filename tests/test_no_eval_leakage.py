@@ -184,22 +184,34 @@ def _tokens_from_question(raw: str) -> set[str]:
     return {t for t in out if t and t not in ALLOW}
 
 
-def _frozenset_string_literals(path: Path) -> set[str]:
+def _set_like_string_literals(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     out: set[str] = set()
+
+    def collect_from_set(node: ast.Set) -> None:
+        for elt in node.elts:
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                out.add(elt.value.lower())
 
     class V(ast.NodeVisitor):
         def visit_Call(self, node: ast.Call) -> None:
             func = node.func
             name = func.id if isinstance(func, ast.Name) else ""
-            if name == "frozenset":
-                for elt in node.args[0].elts if node.args and isinstance(node.args[0], ast.Set) else []:
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                        out.add(elt.value.lower())
+            if name in ("frozenset", "set") and node.args and isinstance(node.args[0], ast.Set):
+                collect_from_set(node.args[0])
+            self.generic_visit(node)
+
+        def visit_Assign(self, node: ast.Assign) -> None:
+            if isinstance(node.value, ast.Set):
+                collect_from_set(node.value)
             self.generic_visit(node)
 
     V().visit(tree)
     return out
+
+
+def _frozenset_string_literals(path: Path) -> set[str]:
+    return _set_like_string_literals(path)
 
 
 def _eval_questions() -> list[str]:
@@ -232,26 +244,80 @@ def _eval_question_vocab() -> set[str]:
     return {w for w in vocab if len(w) >= 3 and w not in COMMON_TITLE}
 
 
-def _frozensets_in_python(path: Path) -> list[frozenset[str]]:
+def _sets_in_python(path: Path) -> list[frozenset[str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     out: list[frozenset[str]] = []
+
+    def add_members(members: set[str]) -> None:
+        if len(members) >= 2:
+            out.append(frozenset(members))
 
     class V(ast.NodeVisitor):
         def visit_Call(self, node: ast.Call) -> None:
             func = node.func
             name = func.id if isinstance(func, ast.Name) else ""
-            if name == "frozenset":
+            if name in ("frozenset", "set") and node.args and isinstance(node.args[0], ast.Set):
                 members: set[str] = set()
-                if node.args and isinstance(node.args[0], ast.Set):
-                    for elt in node.args[0].elts:
-                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                            members.add(elt.value.lower())
-                if members:
-                    out.append(frozenset(members))
+                for elt in node.args[0].elts:
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                        members.add(elt.value.lower())
+                add_members(members)
+            self.generic_visit(node)
+
+        def visit_Assign(self, node: ast.Assign) -> None:
+            if isinstance(node.value, ast.Set):
+                members = {
+                    elt.value.lower()
+                    for elt in node.value.elts
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                }
+                add_members(members)
             self.generic_visit(node)
 
     V().visit(tree)
     return out
+
+
+def _frozensets_in_python(path: Path) -> list[frozenset[str]]:
+    return _sets_in_python(path)
+
+
+def _and_in_q_split_violations(path: Path, split_groups: list[tuple[str, ...]]) -> list[str]:
+    if not split_groups:
+        return []
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    violations: list[str] = []
+    q_names = {"q", "ql", "question", "query", "text"}
+
+    def compare_literal(node: ast.AST) -> str | None:
+        if not isinstance(node, ast.Compare) or len(node.ops) != 1:
+            return None
+        if not isinstance(node.ops[0], ast.In):
+            return None
+        if len(node.comparators) != 1:
+            return None
+        comp = node.comparators[0]
+        if isinstance(comp, ast.Name) and comp.id in q_names:
+            if isinstance(node.left, ast.Constant) and isinstance(node.left.value, str):
+                return node.left.value.lower()
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.BoolOp) or not isinstance(node.op, ast.And):
+            continue
+        lits = [compare_literal(v) for v in node.values]
+        lits = [x for x in lits if x]
+        if len(lits) < 2:
+            continue
+        parts = tuple(sorted(lits))
+        for group in split_groups:
+            if tuple(sorted(group)) == parts:
+                violations.append(
+                    f"{path.name}: and-in-q split {parts!r} (evasion of compound eval phrase)"
+                )
+                break
+    return violations
 
 
 def _banned_from_eval() -> set[str]:
@@ -353,6 +419,7 @@ def scan_path_for_violations(
             violations.append(
                 f"{path.name}: split tokens {parts!r} (evasion of compound eval phrase)"
             )
+    violations.extend(_and_in_q_split_violations(path, split_groups))
     return violations
 
 

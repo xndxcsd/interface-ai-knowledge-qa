@@ -7,8 +7,22 @@ from urllib.parse import urlparse
 from contract import Answer
 
 from kb.evidence import EvidencePack, FactEvidence, is_rate_question
+from kb.facts import ExtractedFact
 from kb.retrieval_hints import is_hours_question, is_list_question
 from kb.textutil import has_any_word, has_word
+
+
+def _newsroom_place_match(fact: ExtractedFact, place: str) -> bool:
+    p = place.lower()
+    blob = f"{fact.subject} {fact.section} {fact.value}".lower()
+    if f.section.lower().startswith("article-places:"):
+        tags = f.section.split(":", 1)[1].lower()
+        if p in tags or p.replace("-", " ") in tags:
+            return True
+    if has_word(blob, p) or p.replace("-", " ") in blob:
+        return True
+    head = fact.subject.split("|", 1)[0].strip().lower()
+    return p == head or p.replace("-", " ") == head
 
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
 PHONE = re.compile(
@@ -106,7 +120,7 @@ def _column_matches(field: str, question: str) -> bool:
     if has_any_word(question, ("apy", "yield")):
         return "apy" in f or "yield" in f
     if has_word(question, "apr"):
-        return "apr" in f or "annual percentage rate" in f
+        return "apr" in f or "annual percentage rate" in f or "apr range" in f
     if has_word(question, "dividend") and not has_any_word(question, ("apy", "yield")):
         return "dividend" in f
     if has_word(question, "rate") and has_any_word(question, ("interest",)):
@@ -115,22 +129,21 @@ def _column_matches(field: str, question: str) -> bool:
 
 
 def _page_product_ok(url: str, section: str, question: str, pack: EvidencePack) -> bool:
+    if is_list_question(question):
+        return True
     path = url.lower()
-    ql = question.lower()
-    asks_business = has_word(ql, "business")
-    asks_personal = has_word(ql, "personal")
+    asks_business = has_word(question, "business")
+    asks_personal = has_word(question, "personal")
+    if asks_business and asks_personal:
+        return True
+    if not asks_business and not asks_personal:
+        return True
     on_business = "/business/" in path
     on_personal = "/personal/" in path
-    if on_business ^ on_personal:
-        if on_business and asks_personal and not asks_business:
-            return False
-        if on_personal and asks_business and not asks_personal:
-            return False
-    if has_any_word(question, ("card", "visa", "credit")):
-        if asks_business:
-            return "business" in path
-        if on_business and "credit-card" in path.replace("_", "-"):
-            return False
+    if asks_business and not asks_personal and on_personal and not on_business:
+        return False
+    if asks_personal and not asks_business and on_business and not on_personal:
+        return False
     return True
 
 
@@ -271,7 +284,7 @@ def _place_in_corpus(place: str, corpus: str) -> bool:
 def _location_corpus(pack: EvidencePack) -> str:
     parts: list[str] = []
     for fe in pack.facts:
-        if fe.fact.field.lower() in ("address", "hours", "phone"):
+        if fe.fact.field.lower() in ("address", "hours", "phone", "square feet"):
             parts.extend([fe.fact.subject, fe.fact.value, fe.fact.section])
     for ce in pack.chunks:
         if any(x in ce.chunk.url.lower() for x in ("/contact", "newsroom", "branch")):
@@ -284,16 +297,23 @@ def _branch_hours_for_place(place: str, pack: EvidencePack) -> bool:
     for fe in pack.facts:
         if fe.fact.field.lower() != "hours":
             continue
+        url = fe.fact.url.lower()
+        if "/newsroom/" in url and not _newsroom_place_match(fe.fact, p):
+            continue
         blob = f"{fe.fact.subject} {fe.fact.value}".lower()
-        if p in blob:
+        if p in blob or has_word(blob, p):
             return True
     for ce in pack.chunks:
         low = ce.chunk.text.lower()
-        if p in low and (
-            TIME_TOKEN.search(ce.chunk.text)
-            or has_any_word(low, ("hour", "hours", "open", "close", "lobby", "drive"))
-        ):
-            return True
+        if "/newsroom/" in ce.chunk.url.lower():
+            title_line = low.split("\n", 1)[0]
+            if p not in title_line and not has_word(low, p):
+                continue
+        if p in low or has_word(low, p):
+            if TIME_TOKEN.search(ce.chunk.text) or has_any_word(
+                low, ("hour", "hours", "open", "close", "lobby", "drive")
+            ):
+                return True
     return False
 
 
@@ -395,5 +415,3 @@ def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer
     return sanitize_refusal(answer)
 
 
-def postcheck_answer(answer: Answer, pack: EvidencePack, question: str) -> Answer:
-    return apply_grounding(answer, pack, question)

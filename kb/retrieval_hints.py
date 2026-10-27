@@ -65,7 +65,7 @@ def canonical_path_hints(question: str) -> list[str]:
         hints.append("personal/loans/personal-loans")
     if _has(q, "money") and _has(q, "market"):
         hints.append("personal/savings-account")
-    if _has(q, "rv") and not _has(q, "service"):
+    if _has(q, "rv"):
         hints.append("personal/loans/recreational-loans")
     seen: set[str] = set()
     out: list[str] = []

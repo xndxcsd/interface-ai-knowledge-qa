@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from kb.evidence import format_evidence_for_prompt, gather_evidence
 from kb.llm import get_llm_client, llm_answer_from_evidence
-from kb.grounding import postcheck_answer
+from kb.grounding import apply_grounding
 from kb.rules_answer import rules_answer
 
 
@@ -53,11 +53,11 @@ def answer_question(store, question: str, as_of: str | None = None):
                 sources=_sources_from_urls(pack, urls),
                 confident=confident,
             )
-            out = postcheck_answer(ans, pack, question)
+            out = apply_grounding(ans, pack, question)
             if os.getenv("KB_LOG_LLM"):
                 print(f"llm_answer latency_s={time.time()-t0:.2f} q={question[:60]!r}", flush=True)
             return out
         except Exception:
             pass
     ans = rules_answer(question, pack)
-    return postcheck_answer(ans, pack, question)
+    return apply_grounding(ans, pack, question)

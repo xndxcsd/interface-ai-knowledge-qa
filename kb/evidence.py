@@ -155,13 +155,24 @@ def gather_evidence(
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
     path_hints = expand_list_path_hints(canonical_path_hints(question), question)
-    branch_places: list[str] = []
-    if is_hours_question(question):
-        from kb.grounding import _named_places
+    from kb.grounding import _named_places
 
-        branch_places = _named_places(question)
+    branch_places = _named_places(question)
     if rate_q and path_hints and not list_q:
         max_facts = max(max_facts, 16)
+
+    def _newsroom_place_ok(f: "ExtractedFact") -> bool:
+        if "/newsroom/" not in f.url.lower() or not branch_places:
+            return True
+        sec = f.section.lower()
+        blob = f"{f.subject} {f.value} {f.section}".lower()
+        for place in branch_places:
+            p = place.lower()
+            if sec.startswith("article-places:") and p in sec.split(":", 1)[-1]:
+                return True
+            if has_word(blob, p) or p.replace("-", " ") in blob:
+                return True
+        return False
 
     def _branch_evidence_boost(blob: str, url: str) -> float:
         if not branch_places:
@@ -183,6 +194,8 @@ def gather_evidence(
             s = score_fact(f, q_tokens, question, rate_question=rate_q)
             if rate_q and path_hints and "/newsroom/" in f.url.lower():
                 s *= 0.05
+            if not _newsroom_place_ok(f):
+                s *= 0.03
             s += _branch_evidence_boost(
                 f"{f.subject} {f.value} {f.section}", f.url
             )

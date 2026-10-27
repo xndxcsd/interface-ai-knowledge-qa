@@ -8,7 +8,6 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from typing import Protocol
 
 LLM_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "15"))
-_LLM_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 class ChatClient(Protocol):
@@ -89,8 +88,14 @@ def _llm_call_once(question: str, evidence_block: str, as_of: str | None) -> dic
 def llm_answer_from_evidence(
     question: str, evidence_block: str, as_of: str | None
 ) -> dict:
-    fut = _LLM_EXECUTOR.submit(_llm_call_once, question, evidence_block, as_of)
+    wall = float(os.getenv("LLM_WALL_S", "20"))
+    ex = ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(_llm_call_once, question, evidence_block, as_of)
     try:
-        return fut.result(timeout=float(os.getenv("LLM_WALL_S", "20")))
+        return fut.result(timeout=wall)
     except FuturesTimeout as e:
+        ex.shutdown(wait=False, cancel_futures=True)
         raise TimeoutError("LLM wall-clock deadline exceeded") from e
+    finally:
+        if fut.done():
+            ex.shutdown(wait=False)

@@ -7,6 +7,8 @@ from kb.authority import authority_score, is_likely_stale_for_rates, normalize_u
 from kb.conflicts import detect_conflicts
 from kb.contact_extract import extract_contact_facts
 from kb.hours_extract import extract_hours_facts
+from kb.newsroom_extract import extract_newsroom_facts
+from kb.prose_rates import extract_prose_apr_facts
 from kb.facts import ExtractedFact, extract_table_facts
 from kb.normalize import fact_key
 from kb.retrieve import BM25Index
@@ -86,6 +88,26 @@ class KnowledgeStore:
                     page_title=p.title or "",
                 )
             )
+            self.facts.extend(
+                extract_prose_apr_facts(
+                    p.markdown,
+                    url=p.url,
+                    snapshot_id=sid,
+                    taken_on=taken,
+                    authority=auth,
+                )
+            )
+            if "/newsroom/" in normalize_url(p.url):
+                self.facts.extend(
+                    extract_newsroom_facts(
+                        p.markdown,
+                        url=p.url,
+                        page_title=p.title or "",
+                        snapshot_id=sid,
+                        taken_on=taken,
+                        authority=auth,
+                    )
+                )
             if "/contact" in normalize_url(p.url) or auth >= 0.9 and "contact" in p.url.lower():
                 self.facts.extend(
                     extract_contact_facts(

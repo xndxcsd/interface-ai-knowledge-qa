@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from kb.article_places import infer_article_places, primary_place_tag, subject_with_place
 from kb.facts import ExtractedFact
 from kb.textutil import strip_non_content
 
@@ -48,9 +49,9 @@ def extract_hours_facts(
 
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
-    article_ctx = ""
-    if "/newsroom/" in (url or "").lower():
-        article_ctx = (page_title or "").strip()
+    newsroom = "/newsroom/" in (url or "").lower()
+    place_tag = primary_place_tag(page_title, md) if newsroom else ""
+    place_tags = infer_article_places(page_title, md) if newsroom else []
 
     def add(label: str, value: str, raw: str, section: str) -> None:
         val = re.sub(r"\s+", " ", value).strip()
@@ -60,17 +61,22 @@ def extract_hours_facts(
         if key in seen:
             return
         seen.add(key)
-        if article_ctx:
-            subject = f"{article_ctx} | {label}"
+        if newsroom and place_tag:
+            subject = subject_with_place(place_tag, label)
+        elif newsroom and page_title:
+            subject = f"{page_title.strip()} | {label}"
         else:
             subject = f"{label} — {val[:36]}"
+        sec = section
+        if newsroom and place_tags:
+            sec = f"article-places:{','.join(place_tags)}"
         facts.append(
             ExtractedFact(
                 subject=subject,
                 field="hours",
                 value=val,
                 raw_row=raw[:200],
-                section=section,
+                section=sec,
                 effective_date=None,
                 url=url,
                 snapshot_id=snapshot_id,
