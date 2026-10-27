@@ -1,0 +1,70 @@
+"""Question answering via evidence retrieval + LLM (or rules fallback)."""
+from __future__ import annotations
+
+import os
+import sys
+import time
+import traceback
+
+from contract import Answer, Source
+
+from kb.evidence import format_evidence_for_prompt, gather_evidence
+from kb.grounding import apply_grounding
+from kb.llm import llm_answer_from_evidence, llm_configured
+from kb.rules_answer import rules_answer
+
+
+def _snapshot_for_url(pack, url: str) -> tuple[str | None, str | None]:
+    u = url.rstrip("/")
+    for fe in pack.facts:
+        if fe.fact.url.rstrip("/") == u:
+            return fe.fact.snapshot_id, fe.fact.raw_row[:120]
+    for ce in pack.chunks:
+        if ce.chunk.url.rstrip("/") == u:
+            return ce.chunk.snapshot_id, ce.chunk.text[:120]
+    return None, None
+
+
+def _sources_from_urls(pack, urls: list[str]) -> list[Source]:
+    out: list[Source] = []
+    seen: set[str] = set()
+    for u in urls or []:
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        sid, quote = _snapshot_for_url(pack, u)
+        out.append(Source(url=u, snapshot_id=sid, quote=quote))
+    return out[:4]
+
+
+def answer_question(store, question: str, as_of: str | None = None) -> Answer:
+    pack = gather_evidence(store, question, as_of)
+    if llm_configured():
+        t0 = time.time()
+        try:
+            block = format_evidence_for_prompt(pack)
+            parsed = llm_answer_from_evidence(question, block, as_of)
+            text = str(parsed.get("text") or "").strip() or "I don't know."
+            confident = bool(parsed.get("confident", True))
+            urls = parsed.get("source_urls") or []
+            ans = Answer(
+                text=text,
+                sources=_sources_from_urls(pack, urls),
+                confident=confident,
+            )
+            out = apply_grounding(ans, pack, question)
+            if os.getenv("KB_LOG_LLM"):
+                print(
+                    f"llm_answer latency_s={time.time()-t0:.2f} q={question[:60]!r}",
+                    flush=True,
+                )
+            return out
+        except Exception as exc:
+            print(
+                f"kb.answer: LLM path failed ({type(exc).__name__}: {exc}); rules fallback",
+                file=sys.stderr,
+            )
+            if os.getenv("KB_LOG_LLM"):
+                traceback.print_exc()
+    ans = rules_answer(question, pack)
+    return apply_grounding(ans, pack, question)

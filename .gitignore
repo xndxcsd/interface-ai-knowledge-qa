@@ -1,0 +1,13 @@
+.venv/
+venv/
+results/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+.env
+.env.*
+snapshots/
+!snapshots/README.md
+snapshots_zip/
+*.zip
