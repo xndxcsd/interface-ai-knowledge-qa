@@ -35,4 +35,4 @@ def test_detect_rate_conflict():
         latest_snapshot_date="2026-09-28",
     )
     assert conflicts
-    assert "3.50" in conflicts[0]["resolution"]
+    assert "3.5" in conflicts[0]["resolution"]

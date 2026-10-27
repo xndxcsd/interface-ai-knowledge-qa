@@ -11,6 +11,7 @@ ADDRESS = re.compile(
     r"^(\d[\d\sA-Za-z.\'-]+(?:,\s*[A-Za-z.\'\s]+)+,\s*[A-Z]{2},\s*\d{5})\s*$",
     re.M,
 )
+ZIP_IN_ADDR = re.compile(r",\s*(\d{5})\s*$")
 US_PHONE = re.compile(
     r"\b(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b"
 )
@@ -49,7 +50,7 @@ def extract_contact_facts(
     seen: set[tuple[str, str, str]] = set()
 
     def add(subject: str, field: str, value: str, raw: str, section: str) -> None:
-        key = (url, subject, field)
+        key = (url, field, value)
         if key in seen:
             return
         seen.add(key)
@@ -70,7 +71,10 @@ def extract_contact_facts(
 
     for m in ADDRESS.finditer(md):
         addr = re.sub(r"\s+", " ", m.group(1)).strip()
-        subj = _nearest_heading(md, m.start())
+        heading = _nearest_heading(md, m.start())
+        zm = ZIP_IN_ADDR.search(addr)
+        zipc = zm.group(1) if zm else str(m.start())
+        subj = f"{heading} — {zipc}"
         add(subj, "address", addr, addr, "locations")
 
     for m in US_PHONE.finditer(md):
@@ -89,7 +93,8 @@ def extract_contact_facts(
     for m in TIME_RANGE.finditer(md):
         val = re.sub(r"\s+", " ", m.group(0)).strip()
         if len(val) >= 10:
-            subj = _nearest_heading(md, m.start())
+            heading = _nearest_heading(md, m.start())
+            subj = f"{heading} — {val[:40]}"
             add(subj, "hours", val, val, "hours")
 
     return facts

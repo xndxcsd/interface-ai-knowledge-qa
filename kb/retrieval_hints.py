@@ -1,46 +1,60 @@
 """Map question themes to canonical site paths (structure only, not eval wording)."""
 from __future__ import annotations
 
+import re
+
+
+def _has(q: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\b", q, re.I) is not None
+
+
+def _has_any(q: str, words: tuple[str, ...]) -> bool:
+    return any(_has(q, w) for w in words)
+
 
 def is_list_question(question: str) -> bool:
     q = question.lower()
-    if " and " in q and any(w in q for w in ("card", "certificate", "account", "loan")):
+    if " and " in q and _has_any(q, ("card", "certificate", "account", "loan", "visa")):
         return True
-    return any(
-        w in q
-        for w in (
-            " list",
-            " each ",
-            " every ",
-            " all ",
-            " both ",
-            "types of",
-        )
+    return _has_any(
+        q,
+        ("list", "each", "every", "all", "both", "offer", "types"),
+    ) and _has_any(q, ("card", "certificate", "rate", "loan", "visa", "apy", "apr"))
+
+
+def is_broad_rate_question(question: str) -> bool:
+    q = question.lower()
+    return _has_any(q, ("rates", "rate sheet")) and _has_any(
+        q, ("mortgage", "certificate", "checking", "savings", "loan", "credit")
     )
 
 
 def canonical_path_hints(question: str) -> list[str]:
     q = question.lower()
     hints: list[str] = []
-    if "card" in q and ("credit" in q or "visa" in q or "apr" in q):
+    if _has(q, "card") and _has_any(q, ("credit", "visa", "apr")):
         hints.extend(["personal/credit-cards", "business/credit-cards"])
     pairs = (
-        (("certificate", " cd", "share certificate"), "personal/savings-account"),
+        (("certificate", "cd"), "personal/savings-account"),
         (("checking",), "personal/checking-accounts"),
-        (("mortgage", "home loan", "refinance"), "personal/loans/home-loans"),
+        (("mortgage", "refinance"), "personal/loans/home-loans"),
         (("auto", "motorcycle", "vehicle"), "personal/loans/auto-motorcycle-loans"),
-        (("boat", "rv", "recreational"), "personal/loans/recreational-loans"),
-        (("personal loan",), "personal/loans/personal-loans"),
+        (("boat", "recreational"), "personal/loans/recreational-loans"),
         (("routing", "aba"), "business/cash-management"),
         (("branch", "lobby", "drive", "atm", "locator", "address"), "contact"),
         (("join", "membership", "eligible"), "about/join"),
-        (("mobile wallet", "mobile payment"), "connect/online-and-mobile-banking"),
+        (("wallet", "mobile"), "connect/online-and-mobile-banking"),
         (("student", "college"), "personal/loans"),
-        (("money market",), "personal/savings-account"),
     )
     for keys, path in pairs:
-        if any(k in q for k in keys):
+        if _has_any(q, keys):
             hints.append(path)
+    if re.search(r"\bpersonal\s+loans?\b", q):
+        hints.append("personal/loans/personal-loans")
+    if _has(q, "money") and _has(q, "market"):
+        hints.append("personal/savings-account")
+    if _has(q, "rv") and not _has(q, "service"):
+        hints.append("personal/loans/recreational-loans")
     seen: set[str] = set()
     out: list[str] = []
     for h in hints:

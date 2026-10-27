@@ -43,7 +43,7 @@ def get_llm_client() -> ChatClient | None:
 SYSTEM_PROMPT = """You answer member questions using ONLY the evidence block.
 
 Rules:
-- Match the product, tier, term, and qualifiers named in the question. Do not substitute a different product or tier.
+- Use the evidence row label (row=), column name, page URL, and section to pick the product/tier/term that matches the question.
 - Prefer the newest snapshot_id and highest-authority rows when rows disagree.
 - Quote numbers, times, phones, addresses, and URLs exactly as they appear in the evidence you use.
 - For broad list requests, include items from every relevant product page represented in the evidence.

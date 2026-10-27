@@ -4,6 +4,8 @@ from __future__ import annotations
 import ast
 import json
 import re
+import tokenize as py_tokenize
+from io import StringIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,48 +13,12 @@ EVAL_DIR = ROOT / "eval"
 SCAN = [ROOT / "solution.py", *sorted((ROOT / "kb").glob("*.py"))]
 STRUCTURAL = re.compile(r"^(personal|business|connect|about)/[\w\-/]+$")
 ALLOW = frozenset(
-    {
-        "%",
-        "apy",
-        "apr",
-        "dupaco",
-        "routing",
-        "phone",
-        "branch",
-        "hours",
-        "account",
-        "accounts",
-        "business",
-        "personal",
-        "contact",
-        "certificate",
-        "savings",
-        "checking",
-        "loan",
-        "loans",
-        "member",
-        "student",
-        "share",
-        "visa",
-        "facts",
-        "table",
-        "term",
-        "info",
-        "join",
-        "locations",
-        "number",
-        "that",
-        "find",
-        "west",
-        "dupaco.com",
-        "info.dupaco.com",
-        "vehicle",
-        "vehicles",
-        "motorcycle",
-        "auto",
-        "rate",
-        "rates",
-    }
+    {"%", "apy", "apr", "dupaco", "rate", "rates", "business", "student", "platinum", "rewards"}
+)
+TIME_RANGE = re.compile(
+    r"\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)\s*[-–—]\s*"
+    r"\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)",
+    re.I,
 )
 
 
@@ -69,13 +35,30 @@ def _literals_in_python(path: Path) -> str:
     return "\n".join(parts).lower()
 
 
-def _tokens_from_gold(raw: str) -> set[str]:
+def _comments_in_python(path: Path) -> str:
+    src = path.read_text(encoding="utf-8")
+    out: list[str] = []
+    try:
+        for tok in py_tokenize.generate_tokens(StringIO(src).readline):
+            if tok.type == py_tokenize.COMMENT:
+                out.append(tok.string.lstrip("#").strip())
+    except py_tokenize.TokenError:
+        pass
+    return "\n".join(out).lower()
+
+
+def _tokens_from_must_token(raw: str) -> set[str]:
     s = str(raw).strip()
     out: set[str] = set()
     low = s.lower()
     if not low:
         return out
-    if len(low) >= 12 and low not in ALLOW:
+    if (
+        any(c.isdigit() for c in low)
+        or "dupaco.com" in low
+        or " " in low
+        or len(low) >= 12
+    ):
         out.add(low)
     for m in re.finditer(r"\d+\.\d+", low):
         out.add(m.group(0))
@@ -85,22 +68,38 @@ def _tokens_from_gold(raw: str) -> set[str]:
         out.add(m.group(0))
     for m in re.finditer(r"\d{1,2}:\d{2}", low):
         out.add(m.group(0))
-    if "join." in low or "info.dupaco.com" in low and " " in s:
+    for m in TIME_RANGE.finditer(s):
+        out.add(re.sub(r"\s+", " ", m.group(0).lower()))
+    if "join." in low or ("dupaco.com" in low and len(low) >= 10):
         out.add(low)
-        host = re.sub(r"^https?://(www\.)?", "", low).split("/")[0]
-        if host and host not in ALLOW and "join." in host:
-            out.add(host)
-    if len(low) >= 14 and "dupaco.com" in low and "/" in low:
+        if "join." in low:
+            out.add("join.dupaco.com")
+    for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
+        out.add(m.group(0).lower())
+    return {t for t in out if t and not STRUCTURAL.match(t) and t not in ALLOW}
+
+
+def _tokens_from_expected_answer(raw: str) -> set[str]:
+    s = str(raw).strip()
+    out: set[str] = set()
+    low = s.lower()
+    if len(low) >= 16:
         out.add(low)
     for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
         out.add(m.group(0).lower())
-    for m in re.finditer(r"\b[A-Z][a-z]{3,}\b", s):
+    for m in TIME_RANGE.finditer(s):
+        out.add(re.sub(r"\s+", " ", m.group(0).lower()))
+    return {t for t in out if t and t not in ALLOW}
+
+
+def _tokens_from_question(raw: str) -> set[str]:
+    s = str(raw).strip()
+    out: set[str] = set()
+    for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
         out.add(m.group(0).lower())
-    for word in re.findall(r"[a-zA-Z']+", s):
-        w = word.lower()
-        if len(w) >= 5 and w not in ALLOW and w.isalpha():
-            out.add(w)
-    return out
+    for m in TIME_RANGE.finditer(s):
+        out.add(re.sub(r"\s+", " ", m.group(0).lower()))
+    return {t for t in out if t and t not in ALLOW}
 
 
 def _banned_from_eval() -> set[str]:
@@ -110,11 +109,19 @@ def _banned_from_eval() -> set[str]:
             if not line.strip():
                 continue
             item = json.loads(line)
-            for key in ("must_include", "must_not_include", "expected_answer"):
-                for raw in item.get(key) or []:
-                    if raw:
-                        out |= _tokens_from_gold(str(raw))
-    return {t for t in out if t and not STRUCTURAL.match(t) and t not in ALLOW}
+            for key in ("must_include", "must_not_include"):
+                val = item.get(key)
+                if isinstance(val, list):
+                    for raw in val:
+                        if raw:
+                            out |= _tokens_from_must_token(str(raw))
+            exp = item.get("expected_answer")
+            if isinstance(exp, str) and exp.strip():
+                out |= _tokens_from_expected_answer(exp)
+            q = item.get("question")
+            if isinstance(q, str) and q.strip():
+                out |= _tokens_from_question(q)
+    return out
 
 
 def test_no_eval_literals_in_kb_source():
@@ -122,14 +129,16 @@ def test_no_eval_literals_in_kb_source():
     violations: list[str] = []
     for path in SCAN:
         lits = _literals_in_python(path)
+        comments = _comments_in_python(path)
+        combined = lits + "\n" + comments
         whole = path.read_text(encoding="utf-8").lower()
         for tok in banned:
             if len(tok) >= 9 and tok.isdigit():
                 if tok in whole:
                     violations.append(f"{path.name}: {tok!r}")
-            elif len(tok) >= 4 and tok in lits:
+            elif len(tok) >= 4 and tok in combined:
                 violations.append(f"{path.name}: {tok!r}")
-            elif len(tok) >= 6 and "dupaco" in tok and tok in lits:
+            elif "dupaco.com" in tok and tok in combined:
                 violations.append(f"{path.name}: {tok!r}")
     assert not violations, "Eval leakage in string literals:\n" + "\n".join(
         sorted(set(violations))

@@ -2,32 +2,27 @@
 
 ## What “current” means
 
-1. **Page versions** — For each canonical URL, only the **latest snapshot at or before `as_of`** is “current.” Older snapshot rows are dropped from facts and from BM25 chunks.
-2. **Fact keys** — `(url, subject, field)` — not value. Stale rates from snapshot 01 cannot coexist with snapshot 05 on the same URL.
-3. **Authority** — Official product pages beat blogs, calculators, and `info.dupaco.com`. Rate answers should cite facts/snippets from high-authority rows with matching `snapshot_id`.
-4. **Contact** — Addresses, phones, routing, and hour patterns on `/contact` are extracted as structured facts (SVG/data-URI stripped before regex extraction).
+1. **Page versions** — For each canonical URL, only the **latest snapshot at or before `as_of`** contributes facts and BM25 chunks.
+2. **Fact keys** — `(url, subject, field)` after normalization (contact rows use distinct subjects per address ZIP or hours text).
+3. **Authority** — Official product pages beat blogs and `info.dupaco.com`.
+4. **Contact** — Regex extraction on `/contact` after stripping SVG/data-URI noise.
 
 ## Conflicts
 
-`conflicts()` reports **cross-snapshot** rate changes on the same product row (and genuine same-snapshot contradictions). Rate/APR and dividend/APY columns for one row are merged into a single conflict. Values are ordered chronologically by snapshot date; footnote markers are stripped from values and resolution. Resolution = current value on the newest high-authority page.
+`conflicts()` compares **each table column separately** (rate vs APR vs dividend vs APY) on the same URL + row. Reports cross-snapshot value changes and same-snapshot contradictions among high-authority facts. Values are deduplicated, footnote markers stripped, dollar amounts in subjects normalized. Resolution = current value on the newest snapshot.
 
 ## Architecture
 
-- Evidence retrieval (facts + BM25, path hints, list expansion across matching pages) → **OpenAI** (`gpt-4o-mini` default, `OPENAI_MAX_TOKENS` default 320) → **grounding** post-check (`kb/grounding.py`).
-- **No LLM response cache** — repeat harness questions re-call the API (temperature 0 for determinism).
-- No-key: short composition from top facts or abstain.
+- Retrieve ranked facts + BM25 chunks → OpenAI with labeled evidence → **grounding** post-check only (no product-specific code rules).
+- No LLM response cache (temperature 0).
+- No-key: compose from top facts or abstain.
 
-## API keys and cost
+## API keys
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Required for production-quality answers |
+| `OPENAI_API_KEY` | Production answers |
 | `OPENAI_MODEL` | Default `gpt-4o-mini` |
-| `OPENAI_MAX_TOKENS` | Default `320` (latency) |
-| `KB_LOG_LLM` | Log LLM latency to stderr |
-
-Paid OpenAI usage. With `gpt-4o-mini`, **~$0.05 per 40-question eval** is typical (tight prompts, ~1.5–2.5 s avg latency observed with key).
-
-## AI-assisted development
+| `OPENAI_MAX_TOKENS` | Default `320` |
 
 Built with AI-assisted development (Cursor Cloud Agent).

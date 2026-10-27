@@ -1,4 +1,4 @@
-"""Ensure answer tokens appear in retrieved evidence."""
+"""Strict-but-simple grounding: tokens in the answer must appear in retrieved evidence."""
 from __future__ import annotations
 
 import re
@@ -7,14 +7,16 @@ from urllib.parse import urlparse
 from contract import Answer
 
 from kb.evidence import EvidencePack, is_rate_question
-from kb.product_match import product_aligns
 from kb.textutil import tokenize
 
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
 PHONE = re.compile(
     r"\b(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b"
 )
-URL_RE = re.compile(r"https?://[^\s\])\"']+", re.I)
+URL_RE = re.compile(
+    r"(?:https?://[^\s\])\"']+|(?:[a-z0-9-]+\.)+dupaco\.com[^\s\])\"']*)",
+    re.I,
+)
 TIME_TOKEN = re.compile(
     r"\b\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)\b", re.I
 )
@@ -44,55 +46,27 @@ def evidence_corpus(pack: EvidencePack) -> str:
     parts: list[str] = []
     for fe in pack.facts:
         f = fe.fact
-        parts.extend([f.url, f.subject, f.field, f.value, f.raw_row])
+        parts.extend([f.url, f.section, f.subject, f.field, f.value, f.raw_row])
     for ce in pack.chunks:
         parts.extend([ce.chunk.url, ce.chunk.text])
     return "\n".join(parts)
 
 
-def _question_product_overlap(question: str, fact_blob: str) -> float:
-    q = {t for t in tokenize(question) if len(t) > 2}
-    if not q:
-        return 1.0
-    f = set(tokenize(fact_blob))
-    return len(q & f) / len(q)
+def _value_in_corpus(num: tuple[str, float], corpus: str) -> bool:
+    return num in _numbers(corpus)
 
 
-def rate_supported(num: tuple[str, float], pack: EvidencePack, question: str) -> bool:
-    for fe in pack.facts:
-        if num not in _numbers(fe.fact.value):
-            continue
-        if not product_aligns(question, fe.fact):
-            continue
-        blob = f"{fe.fact.subject} {fe.fact.field} {fe.fact.value}"
-        if _question_product_overlap(question, blob) >= 0.12:
-            return True
-        if _question_product_overlap(question, fe.fact.url) >= 0.08:
-            return True
-    for ce in pack.chunks:
-        if num not in _numbers(ce.chunk.text):
-            continue
-        if not product_aligns(question, _FactLike(ce.chunk.url, ce.chunk.text)):
-            continue
-        if _question_product_overlap(question, ce.chunk.text) >= 0.1:
-            return True
-    return False
-
-
-class _FactLike:
-    __slots__ = ("url", "subject", "section", "field")
-
-    def __init__(self, url: str, text: str) -> None:
-        self.url = url
-        self.subject = text[:80]
-        self.section = ""
-        self.field = ""
+def _norm_time(s: str) -> str:
+    t = re.sub(r"\b([ap])\.\s?m\.?", r"\1m", s.lower())
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _substr_in_corpus(needle: str, corpus: str) -> bool:
     n = re.sub(r"\s+", " ", needle.lower().strip())
     c = corpus.lower()
     if n in c:
+        return True
+    if _norm_time(needle) in _norm_time(corpus):
         return True
     digits = re.sub(r"\D", "", needle)
     if len(digits) >= 5 and digits in re.sub(r"\D", "", c):
@@ -104,15 +78,19 @@ def _url_in_corpus(url: str, corpus: str) -> bool:
     u = url.rstrip(".,)")
     if u in corpus:
         return True
-    alt = u.replace("https://www.", "https://")
-    if alt in corpus:
-        return True
-    try:
-        p = urlparse(u)
-        host_path = p.netloc.removeprefix("www.") + p.path.rstrip("/")
-        if host_path.lower() in corpus.lower():
+    for alt in (u.replace("https://www.", "https://"), u.replace("https://", "https://www.")):
+        if alt in corpus:
             return True
-        if p.path.rstrip("/") and p.path.rstrip("/").lower() in corpus.lower():
+    try:
+        p = urlparse(u if "://" in u else f"https://{u}")
+        host_path = p.netloc.removeprefix("www.") + p.path.rstrip("/")
+        cl = corpus.lower()
+        if host_path.lower() in cl:
+            return True
+        if (p.netloc.removeprefix("www.") + p.path).lower() in cl:
+            return True
+        bare = host_path if host_path.startswith("dupaco") else f"dupaco.com{p.path.rstrip('/')}"
+        if bare.lower() in cl:
             return True
     except Exception:
         pass
@@ -123,7 +101,7 @@ def _explicit_location_names(question: str) -> list[str]:
     names: list[str] = []
     for m in NAMED_BRANCH.finditer(question):
         g = m.group(1) or m.group(2)
-        if g:
+        if g and g.lower() not in ("dupaco",):
             names.append(g.lower())
     return names
 
@@ -146,7 +124,7 @@ def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer
 
     if is_rate_question(question):
         for n in _numbers(text):
-            if n[0] == "%" and not rate_supported(n, pack, question):
+            if n[0] == "%" and not _value_in_corpus(n, corpus):
                 return _refuse(answer)
 
     for m in PHONE.finditer(text):

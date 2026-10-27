@@ -1,11 +1,11 @@
-"""Detect real conflicts: cross-snapshot changes and same-snapshot contradictions."""
+"""Detect real conflicts: cross-snapshot column changes and same-snapshot contradictions."""
 from __future__ import annotations
 
 import re
 from collections import defaultdict
 
 from kb.facts import ExtractedFact
-from kb.normalize import fact_key, normalize_field, normalize_value
+from kb.normalize import fact_key, normalize_value
 
 NUM = re.compile(r"(\d+(?:\.\d+)?)\s*%?")
 
@@ -21,20 +21,6 @@ def _is_rate_field(field: str, value: str) -> bool:
     return "%" in value or "apy" in f or "apr" in f or "rate" in f or "dividend" in f
 
 
-def _field_group(field: str) -> str:
-    f = normalize_field(field)
-    if "apr" in f or f == "rate" or "annual percentage rate" in f:
-        return "rate_apr"
-    if "dividend" in f or "apy" in f or "yield" in f:
-        return "div_yield"
-    return f
-
-
-def _conflict_key(url: str, subject: str, field: str) -> tuple[str, str, str]:
-    u, s, _ = fact_key(url, subject, field)
-    return (u, s, _field_group(field))
-
-
 def detect_conflicts(
     all_facts: list[ExtractedFact],
     *,
@@ -42,14 +28,11 @@ def detect_conflicts(
     latest_snapshot_date: str,
     min_authority: float = 0.9,
 ) -> list[dict]:
-    current_by_key: dict[tuple[str, str, str], ExtractedFact] = {}
-    for f in current_facts:
-        if f.authority < min_authority:
-            continue
-        ck = _conflict_key(f.url, f.subject, f.field)
-        prev = current_by_key.get(ck)
-        if prev is None or f.taken_on >= prev.taken_on:
-            current_by_key[ck] = f
+    current_by_key = {
+        fact_key(f.url, f.subject, f.field): f
+        for f in current_facts
+        if f.authority >= min_authority
+    }
 
     groups: dict[tuple[str, str, str], list[ExtractedFact]] = defaultdict(list)
     for f in all_facts:
@@ -57,7 +40,7 @@ def detect_conflicts(
             continue
         if not _is_rate_field(f.field, f.value):
             continue
-        groups[_conflict_key(f.url, f.subject, f.field)].append(f)
+        groups[fact_key(f.url, f.subject, f.field)].append(f)
 
     out: list[dict] = []
     for key, members in groups.items():
@@ -89,22 +72,21 @@ def detect_conflicts(
             continue
 
         timeline: list[tuple[str, str, ExtractedFact]] = []
-        seen_val_snap: set[tuple[str, str]] = set()
+        seen_val: set[str] = set()
         for m in sorted(members, key=lambda x: (x.taken_on, x.snapshot_id)):
             nv = normalize_value(m.value)
-            sk = (m.taken_on, nv)
-            if sk in seen_val_snap:
+            if nv in seen_val:
                 continue
-            seen_val_snap.add(sk)
+            seen_val.add(nv)
             timeline.append((m.taken_on, nv, m))
 
         values = [nv for _, nv, _ in timeline]
         sources = []
         for _, nv, m in timeline:
-            sources.append((m.url, m.snapshot_id, m.raw_row[:120]))
+            sources.append((m.url, m.snapshot_id, normalize_value(m.raw_row[:120])))
 
-        _, subject, fgroup = key
-        topic = f"{subject} — {fgroup.replace('_', '/')}"
+        _, subject, field = key
+        topic = f"{subject} — {field}"
         reason = (
             f"Use current value from newest snapshot ({latest_snapshot_date}) "
             f"on the official product page."

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from kb.retrieval_hints import canonical_path_hints, is_list_question
+from kb.retrieval_hints import canonical_path_hints, is_broad_rate_question, is_list_question
 from kb.textutil import tokenize
 
 if TYPE_CHECKING:
@@ -106,8 +106,9 @@ def gather_evidence(
 ) -> EvidencePack:
     store.finalize()
     list_q = is_list_question(question)
-    if list_q:
-        max_facts, max_chunks = 36, 8
+    broad_rates = is_broad_rate_question(question)
+    if list_q or broad_rates:
+        max_facts, max_chunks = 40, 10
 
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
@@ -149,7 +150,7 @@ def gather_evidence(
         if page is not None:
             hint_pages.append(page)
 
-    if list_q:
+    if list_q or broad_rates:
         for h in path_hints:
             for f in store.facts_as_of_ranked(as_of):
                 if h in f.url.lower():
@@ -184,15 +185,21 @@ def normalize_url_match(a: str, b: str) -> bool:
 
 
 def format_evidence_for_prompt(pack: EvidencePack) -> str:
-    lines = ["FACTS (use snapshot_id on each row; prefer highest authority / newest snapshot):"]
-    for i, fe in enumerate(pack.facts[:10], 1):
+    lines = [
+        "FACTS (each row: page URL, table section, row label, column, value, snapshot_id):"
+    ]
+    cap = min(len(pack.facts), 28)
+    for i, fe in enumerate(pack.facts[:cap], 1):
         f = fe.fact
+        sec = f.section or "(section)"
         lines.append(
-            f"F{i}|snap={f.snapshot_id}|auth={f.authority:.2f}|{f.url}\n"
-            f"  {f.subject}|{f.field}={f.value}"
+            f"F{i}|snap={f.snapshot_id}|auth={f.authority:.2f}\n"
+            f"  page={f.url}\n"
+            f"  section={sec}|row={f.subject}|column={f.field}|value={f.value}"
         )
     lines.append("SNIPPETS:")
-    for i, ce in enumerate(pack.chunks[:5], 1):
+    cap_c = min(len(pack.chunks), 8)
+    for i, ce in enumerate(pack.chunks[:cap_c], 1):
         c = ce.chunk
         tag = "STALE" if c.stale_for_rates else "OK"
         lines.append(
