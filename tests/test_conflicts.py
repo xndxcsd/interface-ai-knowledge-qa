@@ -29,6 +29,10 @@ def test_detect_rate_conflict():
             authority=1.0,
         ),
     ]
-    conflicts = detect_conflicts(facts, latest_snapshot_date="2026-09-28")
+    conflicts = detect_conflicts(
+        facts,
+        current_facts=[facts[1]],
+        latest_snapshot_date="2026-09-28",
+    )
     assert conflicts
-    assert "3.50%" in conflicts[0]["resolution"]
+    assert "3.50" in conflicts[0]["resolution"]

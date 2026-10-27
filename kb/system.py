@@ -94,7 +94,8 @@ class KnowledgeStore:
             return
         self._build_latest_index()
         self._conflicts_raw = detect_conflicts(
-            self.facts_for_conflicts(None),
+            [f for f in self.facts if f.authority >= 0.9],
+            current_facts=self.facts_for_conflicts(None),
             latest_snapshot_date=self.latest_taken_on(),
         )
         self._finalized = True

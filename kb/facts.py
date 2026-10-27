@@ -75,6 +75,21 @@ def extract_table_facts(
                 pos = md.find(raw)
                 sec = section_at(pos)
                 subject = row_cells[0]
+                if len(header) > 1 and len(row_cells) > 1:
+                    h1 = header[1].lower()
+                    if any(
+                        x in h1
+                        for x in (
+                            "tier",
+                            "balance",
+                            "term",
+                            "month",
+                            "program",
+                            "model",
+                            "loan",
+                        )
+                    ):
+                        subject = f"{subject} | {row_cells[1]}"
                 for j, h in enumerate(header[1:], start=1):
                     if j >= len(row_cells):
                         break

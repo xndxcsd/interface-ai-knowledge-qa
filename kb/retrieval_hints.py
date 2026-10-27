@@ -1,24 +1,20 @@
-"""Map question themes to canonical site paths (general site structure, not eval IDs)."""
+"""Map question themes to canonical site paths (structure only, not eval wording)."""
 from __future__ import annotations
 
 
 def is_list_question(question: str) -> bool:
     q = question.lower()
+    if " and " in q and any(w in q for w in ("card", "certificate", "account", "loan")):
+        return True
     return any(
         w in q
         for w in (
-            "all ",
-            "each ",
-            "list",
-            "every",
-            "what cards",
-            "what are the",
-            "summarize all",
-            "name each",
-            "rates for the",
-            "give me all",
-            "certificate",
-            "credit card",
+            " list",
+            " each ",
+            " every ",
+            " all ",
+            " both ",
+            "types of",
         )
     )
 
@@ -26,21 +22,20 @@ def is_list_question(question: str) -> bool:
 def canonical_path_hints(question: str) -> list[str]:
     q = question.lower()
     hints: list[str] = []
-    if "credit card" in q or ("visa" in q and "apr" in q):
+    if "card" in q and ("credit" in q or "visa" in q or "apr" in q):
         hints.extend(["personal/credit-cards", "business/credit-cards"])
     pairs = (
-        (("certificate", " cd", "term share", "share certificate"), "personal/savings-account"),
-        (("checking", "1st rate", "free checking"), "personal/checking-accounts"),
-        (("mortgage", "home loan", "refinance", "30-year", "15-year"), "personal/loans/home-loans"),
-        (("auto loan", "motorcycle", "vehicle loan"), "personal/loans/auto-motorcycle-loans"),
-        (("personal loan", "signature loan"), "personal/loans/personal-loans"),
-        (("business card",), "business/credit-cards"),
-        (("routing", "aba", "wire"), "business/cash-management"),
-        (("branch", "lobby", "drive-up", "atm", "locator", "address"), "contact"),
-        (("join", "membership", "eligible", "member"), "about/join"),
-        (("mobile wallet", "apple pay", "google pay", "samsung pay"), "connect/online-and-mobile-banking"),
-        (("student loan", "college"), "personal/loans"),
-        (("money market", "investor"), "personal/savings-account"),
+        (("certificate", " cd", "share certificate"), "personal/savings-account"),
+        (("checking",), "personal/checking-accounts"),
+        (("mortgage", "home loan", "refinance"), "personal/loans/home-loans"),
+        (("auto", "motorcycle", "vehicle"), "personal/loans/auto-motorcycle-loans"),
+        (("personal loan",), "personal/loans/personal-loans"),
+        (("routing", "aba"), "business/cash-management"),
+        (("branch", "lobby", "drive", "atm", "locator", "address"), "contact"),
+        (("join", "membership", "eligible"), "about/join"),
+        (("mobile wallet", "mobile payment"), "connect/online-and-mobile-banking"),
+        (("student", "college"), "personal/loans"),
+        (("money market",), "personal/savings-account"),
     )
     for keys, path in pairs:
         if any(k in q for k in keys):

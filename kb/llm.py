@@ -1,4 +1,4 @@
-"""OpenAI-backed answer synthesis (no response cache — harness repeat stays meaningful)."""
+"""OpenAI-backed answer synthesis (no response cache)."""
 from __future__ import annotations
 
 import json
@@ -40,17 +40,15 @@ def get_llm_client() -> ChatClient | None:
         return None
 
 
-SYSTEM_PROMPT = """You answer Dupaco member questions using ONLY the evidence block.
+SYSTEM_PROMPT = """You answer member questions using ONLY the evidence block.
 
 Rules:
-- Every rate/APY/APR must come from a FACT or SNIPPET row whose snapshot_id matches the newest evidence for that URL. Ignore STALE snippets and old snapshot rows when a newer snapshot exists for the same page.
-- Match the product named in the question (Share Savings vs HSA vs Money Market vs business vs personal cards). Do not attribute one product's rate to another.
-- For lists (cards, certificates), combine personal AND business pages when both appear in evidence.
-- For Share Savings tier questions, use only Share Savings table rows; maximum Share Savings APY is 0.20%.
-- Mortgage: prefer Purchase rows for the loan amount tier asked; do not quote expired Rate Relief promo rates as current standard rates unless the question asks about that program.
-- Forbes recognition: prefer the newest newsroom story that states how many times Forbes recognized Dupaco (e.g. "fifth time").
-- Branch info: use contact/locator evidence; include 8:30 lobby times when present; drive-up often 8 a.m.–6 p.m. at many branches.
-- If evidence is insufficient, confident=false and say you don't know (no phone numbers unless in evidence).
+- Match the product, tier, term, and qualifiers named in the question. Do not substitute a different product or tier.
+- Prefer the newest snapshot_id and highest-authority rows when rows disagree.
+- Quote numbers, times, phones, addresses, and URLs exactly as they appear in the evidence you use.
+- For broad list requests, include items from every relevant product page represented in the evidence.
+- Ignore STALE-tagged snippets for current-rate questions unless no newer row exists.
+- If the evidence does not contain the answer, set confident=false and say you don't know.
 
 JSON only:
 {"text":"...", "source_urls":["https://..."], "confident":true|false}"""
@@ -68,9 +66,9 @@ def llm_answer_from_evidence(
     question: str, evidence_block: str, as_of: str | None
 ) -> dict:
     as_of_line = (
-        f"Answer as the website stood on {as_of} (use only evidence at or before that date)."
+        f"Answer as the website stood on {as_of} (evidence at or before that date)."
         if as_of
-        else "Answer for the latest snapshot (newest page versions)."
+        else "Answer using the latest snapshot versions in the evidence."
     )
     user = f"{as_of_line}\n\nQuestion: {question}\n\n{evidence_block}"
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

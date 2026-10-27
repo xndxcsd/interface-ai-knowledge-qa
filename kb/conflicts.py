@@ -1,11 +1,11 @@
-"""Cross-page conflict detection (precision-focused)."""
+"""Detect real conflicts: cross-snapshot changes and same-snapshot contradictions."""
 from __future__ import annotations
 
 import re
 from collections import defaultdict
 
 from kb.facts import ExtractedFact
-from kb.normalize import fact_key, normalize_url, normalize_value
+from kb.normalize import fact_key, normalize_value
 
 NUM = re.compile(r"(\d+(?:\.\d+)?)\s*%?")
 
@@ -16,28 +16,34 @@ def _num_key(val: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _is_rate_field(field: str) -> bool:
+def _is_rate_field(field: str, value: str) -> bool:
     f = field.lower()
-    return "%" in f or "apy" in f or "apr" in f or "rate" in f or "dividend" in f
+    return "%" in value or "apy" in f or "apr" in f or "rate" in f or "dividend" in f
 
 
 def detect_conflicts(
-    facts: list[ExtractedFact],
+    all_facts: list[ExtractedFact],
     *,
+    current_facts: list[ExtractedFact],
     latest_snapshot_date: str,
     min_authority: float = 0.9,
 ) -> list[dict]:
-    """Conflicts: same URL + product row + field, different numeric values."""
+    current_by_key = {
+        fact_key(f.url, f.subject, f.field): f
+        for f in current_facts
+        if f.authority >= min_authority
+    }
+
     groups: dict[tuple[str, str, str], list[ExtractedFact]] = defaultdict(list)
-    for f in facts:
+    for f in all_facts:
         if f.authority < min_authority:
             continue
-        if not _is_rate_field(f.field) and "%" not in f.value:
+        if not _is_rate_field(f.field, f.value):
             continue
         groups[fact_key(f.url, f.subject, f.field)].append(f)
 
     out: list[dict] = []
-    for (canon, subject, field), members in groups.items():
+    for key, members in groups.items():
         by_num: dict[str, list[ExtractedFact]] = defaultdict(list)
         for m in members:
             nk = _num_key(m.value)
@@ -45,24 +51,49 @@ def detect_conflicts(
                 by_num[nk].append(m)
         if len(by_num) < 2:
             continue
+
+        cur = current_by_key.get(key)
+        if cur is None:
+            continue
+
+        cur_val = normalize_value(cur.value)
+        older = [m for m in members if m.taken_on < cur.taken_on]
+        older_vals = {normalize_value(m.value) for m in older}
+        same_snap_vals = {
+            normalize_value(m.value)
+            for m in members
+            if m.snapshot_id == cur.snapshot_id
+        }
+
+        cross = bool(older_vals - {cur_val})
+        internal = len(same_snap_vals) > 1
+        if not cross and not internal:
+            continue
+
         nums = sorted(by_num.keys(), key=float)
-        values = [f"{n}%" if "%" not in normalize_value(by_num[n][0].value) else normalize_value(by_num[n][0].value) for n in nums]
+        values = [
+            normalize_value(by_num[n][0].value)
+            if "%" in normalize_value(by_num[n][0].value)
+            else f"{n}%"
+            for n in nums
+        ]
         sources = []
         for n in nums:
             best = max(by_num[n], key=lambda x: (x.taken_on, x.authority))
             sources.append((best.url, best.snapshot_id, best.raw_row[:120]))
-        newest = max(members, key=lambda x: (x.taken_on, x.authority))
-        resolution = normalize_value(newest.value)
-        reason = (
-            f"Prefer value from newest snapshot ({latest_snapshot_date}) on official product page."
-        )
+
+        _, subject, field = key
         topic = f"{subject} — {field}"
+        reason = (
+            f"Use current value from newest snapshot ({latest_snapshot_date}) "
+            f"on the official product page."
+        )
         out.append(
             {
                 "topic": topic,
                 "values": values,
                 "sources": sources,
-                "resolution": resolution,
+                "resolution": cur_val,
                 "reason": reason,
             }
         )
