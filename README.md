@@ -67,4 +67,6 @@ Two public runs on the strict scorer: **~0.78** (0.779 and 0.781). Dev set: **~0
 
 - Cross-encoder reranking; `--judge` for list rubric items; fixture tests without eval wording.
 
-Built with AI-assisted development (Cursor Cloud Agent).
+## Development notes and git history
+
+This solution was built with AI-assisted development (Cursor coding agents), reviewed and directed by the author. The git history is left intact on purpose: some early commits (for example `9a8c18b`, `b8a34e9`, `3fe8127`, `6d56d82`) contained eval-specific shortcuts—hardcoded answers or question-keyed triggers tuned to the public sample questions. Those were removed from `1ae0ca7` onward and replaced by the general retrieval and grounding approach described above. The final submission is the commit named in the submission email; it contains no hardcoded eval answers, and `tests/` includes a leakage scanner that fails if eval question text or gold answers appear in the source. Retrieval weights were tuned on the self-written dev set (`eval/holdout_eval.jsonl`), as already noted in this README.
