@@ -46,6 +46,35 @@ def has_any_word(text: str, words: tuple[str, ...] | list[str]) -> bool:
     return any(has_word(text, w) for w in words)
 
 
+def url_path_segments(url: str) -> set[str]:
+    """Whole path segments from a URL (split on /, -, _)."""
+    from urllib.parse import urlparse
+
+    raw = url if "://" in url else f"https://{url}"
+    path = urlparse(raw).path.lower()
+    segs: set[str] = set()
+    for part in re.split(r"[/\-_]", path):
+        if len(part) > 1:
+            segs.add(part)
+    return segs
+
+
+def url_has_segment(url: str, token: str) -> bool:
+    t = token.lower().rstrip("%")
+    if len(t) <= 2:
+        return False
+    return t in url_path_segments(url)
+
+
+def hint_matches_url(path_hint: str, url: str) -> bool:
+    """True when every hint segment appears as a whole segment in the URL path."""
+    hint_parts = [p for p in re.split(r"[/\-_]", path_hint.lower()) if len(p) > 1]
+    if not hint_parts:
+        return path_hint.lower() in url.lower()
+    url_segs = url_path_segments(url)
+    return all(p in url_segs for p in hint_parts)
+
+
 def split_paragraphs(md: str) -> list[str]:
     parts = re.split(r"\n\s*\n", md or "")
     return [p.strip() for p in parts if p.strip()]

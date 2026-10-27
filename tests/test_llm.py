@@ -46,8 +46,11 @@ def test_llm_wall_clock_times_out(monkeypatch):
     import kb.llm as llm_mod
     import openai
 
-    monkeypatch.setattr(openai, "OpenAI", lambda **kw: FakeClient(delay=2.0))
-    monkeypatch.setattr(llm_mod, "OpenAI", lambda **kw: FakeClient(delay=2.0), raising=False)
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: FakeClient(delay=8.0))
+    monkeypatch.setattr(llm_mod, "OpenAI", lambda **kw: FakeClient(delay=8.0), raising=False)
 
+    t0 = time.monotonic()
     with pytest.raises(TimeoutError):
         llm_answer_from_evidence("q", "evidence", None)
+    elapsed = time.monotonic() - t0
+    assert elapsed < 0.3 + 1.0

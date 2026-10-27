@@ -16,6 +16,10 @@ def is_list_question(question: str) -> bool:
     q = question.lower()
     if re.search(r"\bcredit\s+cards?\b", q):
         return True
+    if _has(q, "card") and _has_any(
+        q, ("list", "each", "every", "all", "both", "types", "which", "what", "offer")
+    ):
+        return True
     if " and " in q and _has_any(q, ("card", "certificate", "account", "loan", "visa")):
         return True
     return _has_any(q, ("list", "each", "every", "all", "both", "types")) and _has_any(
@@ -78,7 +82,7 @@ def expand_list_path_hints(path_hints: list[str], question: str) -> list[str]:
         return path_hints
     q = question.lower()
     hints = list(path_hints)
-    if re.search(r"\bcredit\s+cards?\b", q) or _has_any(q, ("card", "visa")):
+    if _has(q, "card") or _has(q, "visa") or re.search(r"\bcredit\s+cards?\b", q):
         for p in ("personal/credit-cards", "business/credit-cards"):
             if p not in hints:
                 hints.append(p)

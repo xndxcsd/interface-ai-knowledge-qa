@@ -40,6 +40,7 @@ def extract_hours_facts(
     snapshot_id: str,
     taken_on: str,
     authority: float,
+    page_title: str = "",
 ) -> list[ExtractedFact]:
     md = strip_non_content(markdown or "")
     if not HOURS_CONTEXT.search(md) and not TIME_RANGE.search(md):
@@ -47,6 +48,9 @@ def extract_hours_facts(
 
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
+    article_ctx = ""
+    if "/newsroom/" in (url or "").lower():
+        article_ctx = (page_title or "").strip()
 
     def add(label: str, value: str, raw: str, section: str) -> None:
         val = re.sub(r"\s+", " ", value).strip()
@@ -56,9 +60,13 @@ def extract_hours_facts(
         if key in seen:
             return
         seen.add(key)
+        if article_ctx:
+            subject = f"{article_ctx} | {label}"
+        else:
+            subject = f"{label} — {val[:36]}"
         facts.append(
             ExtractedFact(
-                subject=f"{label} — {val[:36]}",
+                subject=subject,
                 field="hours",
                 value=val,
                 raw_row=raw[:200],

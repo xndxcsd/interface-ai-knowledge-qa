@@ -8,7 +8,7 @@ from contract import Answer
 
 from kb.evidence import EvidencePack, FactEvidence, is_rate_question
 from kb.retrieval_hints import is_hours_question, is_list_question
-from kb.textutil import has_any_word, has_word, tokenize
+from kb.textutil import has_any_word, has_word
 
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
 PHONE = re.compile(
@@ -114,36 +114,23 @@ def _column_matches(field: str, question: str) -> bool:
     return True
 
 
-def _page_context(url: str, section: str, pack: EvidencePack) -> str:
-    u = url.rstrip("/").lower()
-    parts: list[str] = [u.replace("-", " ").replace("/", " "), section or ""]
-    for fe in pack.facts:
-        if fe.fact.url.rstrip("/").lower() == u and fe.fact.section:
-            parts.append(fe.fact.section)
-    for ce in pack.chunks:
-        if ce.chunk.url.rstrip("/").lower() == u:
-            parts.append(ce.chunk.text[:400])
-            break
-    return " ".join(parts).lower()
-
-
 def _page_product_ok(url: str, section: str, question: str, pack: EvidencePack) -> bool:
     path = url.lower()
-    if has_any_word(question, ("card", "visa", "credit")):
-        if has_word(question, "business"):
-            return "business" in path
-        if "business/credit-cards" in path or (
-            "business" in path and "credit-card" in path.replace("_", "-")
-        ):
+    ql = question.lower()
+    asks_business = has_word(ql, "business")
+    asks_personal = has_word(ql, "personal")
+    on_business = "/business/" in path
+    on_personal = "/personal/" in path
+    if on_business ^ on_personal:
+        if on_business and asks_personal and not asks_business:
             return False
-    ctx = _page_context(url, section, pack)
-    qtoks = {t for t in tokenize(question) if len(t) >= 3 and t not in GENERIC}
-    if not qtoks:
-        return True
-    ctoks = set(tokenize(ctx))
-    path_toks = set(tokenize(path.replace("-", " ").replace("/", " ")))
-    if qtoks & (ctoks | path_toks):
-        return True
+        if on_personal and asks_business and not asks_personal:
+            return False
+    if has_any_word(question, ("card", "visa", "credit")):
+        if asks_business:
+            return "business" in path
+        if on_business and "credit-card" in path.replace("_", "-"):
+            return False
     return True
 
 

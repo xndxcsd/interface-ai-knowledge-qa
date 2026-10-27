@@ -83,6 +83,7 @@ class KnowledgeStore:
                     snapshot_id=sid,
                     taken_on=taken,
                     authority=auth,
+                    page_title=p.title or "",
                 )
             )
             if "/contact" in normalize_url(p.url) or auth >= 0.9 and "contact" in p.url.lower():

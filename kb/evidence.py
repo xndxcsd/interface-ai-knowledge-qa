@@ -13,7 +13,13 @@ from kb.retrieval_hints import (
     is_hours_question,
     is_list_question,
 )
-from kb.textutil import has_any_word, has_word, tokenize
+from kb.textutil import (
+    has_any_word,
+    has_word,
+    hint_matches_url,
+    tokenize,
+    url_path_segments,
+)
 
 if TYPE_CHECKING:
     from kb.facts import ExtractedFact
@@ -60,7 +66,7 @@ def score_fact(
         auth *= 0.2
     bonus = 0.0
     for t in q_tokens:
-        if t.rstrip("%") in blob or t in f.subject.lower():
+        if has_word(blob, t.rstrip("%")) or has_word(f.subject, t):
             bonus += 0.12
     for m in re.finditer(r"\$?\d[\d,]*", question):
         if m.group(0).replace(",", "") in blob.replace(",", ""):
@@ -98,9 +104,10 @@ def _chunk_priority(text: str) -> tuple[int, int, int, int]:
 
 
 def _hint_path_score(path_hint: str, url: str, q_tokens: set[str]) -> int:
-    hint = path_hint.lower().replace("/", " ")
-    u = url.lower()
-    return sum(1 for t in q_tokens if len(t) > 2 and (t in hint or t in u))
+    if not hint_matches_url(path_hint, url):
+        return 0
+    url_segs = url_path_segments(url)
+    return sum(1 for t in q_tokens if len(t) > 2 and t in url_segs)
 
 
 def _inject_page_chunks(
@@ -148,8 +155,25 @@ def gather_evidence(
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
     path_hints = expand_list_path_hints(canonical_path_hints(question), question)
+    branch_places: list[str] = []
+    if is_hours_question(question):
+        from kb.grounding import _named_places
+
+        branch_places = _named_places(question)
     if rate_q and path_hints and not list_q:
         max_facts = max(max_facts, 16)
+
+    def _branch_evidence_boost(blob: str, url: str) -> float:
+        if not branch_places:
+            return 0.0
+        low = blob.lower()
+        u = url.lower()
+        for place in branch_places:
+            if has_word(low, place) or has_word(u, place.replace("-", " ")):
+                return 2.0
+            if place in low or place.replace("-", " ") in low:
+                return 2.0
+        return 0.0
 
     def score_all_facts():
         facts_raw = store.facts_as_of_ranked(as_of)
@@ -157,10 +181,15 @@ def gather_evidence(
         seen: set[tuple[str, str, str]] = set()
         for f in facts_raw:
             s = score_fact(f, q_tokens, question, rate_question=rate_q)
+            if rate_q and path_hints and "/newsroom/" in f.url.lower():
+                s *= 0.05
+            s += _branch_evidence_boost(
+                f"{f.subject} {f.value} {f.section}", f.url
+            )
             for hint in path_hints:
-                if hint in f.url.lower():
+                if hint_matches_url(hint, f.url):
                     s += 0.5 * f.authority
-            if list_q and any(h in f.url.lower() for h in path_hints):
+            if list_q and any(hint_matches_url(h, f.url) for h in path_hints):
                 s += 0.35
             if s <= 0.02 and rate_q and not path_hints:
                 continue
@@ -213,7 +242,7 @@ def gather_evidence(
     if list_q or broad_rates:
         for h in path_hints:
             for f in store.facts_as_of_ranked(as_of):
-                if h in f.url.lower():
+                if hint_matches_url(h, f.url):
                     s = score_fact(f, q_tokens, question, rate_question=rate_q) + 0.65
                     scored_facts.append(FactEvidence(f, s))
         for page in hint_pages:
@@ -243,14 +272,18 @@ def gather_evidence(
             else:
                 _inject_page_chunks(page, chunk_hits, extra=False)
 
-    if any("/newsroom/" in ch.url for ch, _ in chunk_hits) or not rate_q:
+    if branch_places or (
+        (any("/newsroom/" in ch.url for ch, _ in chunk_hits) or not rate_q)
+        and not (rate_q and path_hints and not list_q)
+    ):
         _append_newsroom_chunks(chunk_hits)
         max_chunks = max(max_chunks, 8)
 
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
         weight = ch.authority * (0.15 if (rate_q and ch.stale_for_rates) else 1.0)
-        chunks.append(ChunkEvidence(ch, bm25_score * weight))
+        score = bm25_score * weight + _branch_evidence_boost(ch.text, ch.url)
+        chunks.append(ChunkEvidence(ch, score))
     if rate_q and path_hints and not list_q:
         chunks.sort(
             key=lambda c: (

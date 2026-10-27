@@ -202,6 +202,58 @@ def _frozenset_string_literals(path: Path) -> set[str]:
     return out
 
 
+def _eval_questions() -> list[str]:
+    out: list[str] = []
+    for path in EVAL_DIR.glob("*.jsonl"):
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            item = json.loads(line)
+            q = item.get("question")
+            if isinstance(q, str) and q.strip():
+                out.append(q.strip())
+    return out
+
+
+def _question_ngrams_from_eval(min_words: int = 4) -> set[str]:
+    ngrams: set[str] = set()
+    for q in _eval_questions():
+        words = re.findall(r"[a-z0-9'.-]+", q.lower())
+        for n in range(min_words, len(words) + 1):
+            for i in range(len(words) - n + 1):
+                ngrams.add(" ".join(words[i : i + n]))
+    return ngrams
+
+
+def _eval_question_vocab() -> set[str]:
+    vocab: set[str] = set()
+    for q in _eval_questions():
+        vocab |= _whole_words(q.lower())
+    return {w for w in vocab if len(w) >= 3 and w not in COMMON_TITLE}
+
+
+def _frozensets_in_python(path: Path) -> list[frozenset[str]]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out: list[frozenset[str]] = []
+
+    class V(ast.NodeVisitor):
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else ""
+            if name == "frozenset":
+                members: set[str] = set()
+                if node.args and isinstance(node.args[0], ast.Set):
+                    for elt in node.args[0].elts:
+                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                            members.add(elt.value.lower())
+                if members:
+                    out.append(frozenset(members))
+            self.generic_visit(node)
+
+    V().visit(tree)
+    return out
+
+
 def _banned_from_eval() -> set[str]:
     out: set[str] = set()
     for path in EVAL_DIR.glob("*.jsonl"):
@@ -250,18 +302,39 @@ def _whole_words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9'.-]+", text.lower()))
 
 
-def scan_path_for_violations(path: Path, banned: set[str], split_groups: list[tuple[str, ...]]) -> list[str]:
+def scan_path_for_violations(
+    path: Path,
+    banned: set[str],
+    split_groups: list[tuple[str, ...]],
+    *,
+    question_ngrams: set[str] | None = None,
+    eval_q_vocab: set[str] | None = None,
+) -> list[str]:
+    question_ngrams = question_ngrams or set()
+    eval_q_vocab = eval_q_vocab or set()
     violations: list[str] = []
     lits = _literals_in_python(path)
     comments = _comments_in_python(path)
     combined = lits + "\n" + comments
     words = _whole_words(combined)
     whole = path.read_text(encoding="utf-8").lower()
+    for ng in question_ngrams:
+        if len(ng) < 12:
+            continue
+        if re.search(rf"(?<![a-z0-9]){re.escape(ng)}(?![a-z0-9])", combined):
+            violations.append(f"{path.name}: question n-gram {ng!r}")
     for tok in banned:
         if " " in tok and len(tok) >= 12 and re.search(
             rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", combined
         ):
             violations.append(f"{path.name}: question phrase {tok!r}")
+    for fs in _frozensets_in_python(path):
+        if len(fs) < 2:
+            continue
+        if all(w in eval_q_vocab for w in fs):
+            violations.append(
+                f"{path.name}: frozenset all eval question words {sorted(fs)!r}"
+            )
     for tok in _frozenset_string_literals(path):
         if tok in banned and len(tok) >= 4:
             violations.append(f"{path.name}: stopword {tok!r}")
@@ -286,9 +359,19 @@ def scan_path_for_violations(path: Path, banned: set[str], split_groups: list[tu
 def test_no_eval_literals_in_kb_source():
     banned = _banned_from_eval()
     split_groups = _split_token_groups(banned)
+    question_ngrams = _question_ngrams_from_eval()
+    eval_q_vocab = _eval_question_vocab()
     violations: list[str] = []
     for path in SCAN:
-        violations.extend(scan_path_for_violations(path, banned, split_groups))
+        violations.extend(
+            scan_path_for_violations(
+                path,
+                banned,
+                split_groups,
+                question_ngrams=question_ngrams,
+                eval_q_vocab=eval_q_vocab,
+            )
+        )
     assert not violations, "Eval leakage in string literals:\n" + "\n".join(
         sorted(set(violations))
     )
