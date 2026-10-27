@@ -7,7 +7,8 @@ from urllib.parse import urlparse
 from contract import Answer
 
 from kb.evidence import EvidencePack, FactEvidence, is_rate_question
-from kb.textutil import tokenize
+from kb.retrieval_hints import is_hours_question, is_list_question
+from kb.textutil import has_any_word, has_word, tokenize
 
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
 PHONE = re.compile(
@@ -102,68 +103,72 @@ def _url_in_corpus(url: str, corpus: str) -> bool:
 
 def _column_matches(field: str, question: str) -> bool:
     f = field.lower()
-    q = question.lower()
-    if re.search(r"\bapy\b|\byield\b", q):
+    if has_any_word(question, ("apy", "yield")):
         return "apy" in f or "yield" in f
-    if re.search(r"\bapr\b", q):
+    if has_word(question, "apr"):
         return "apr" in f or "annual percentage rate" in f
-    if "dividend" in q and "apy" not in q:
+    if has_word(question, "dividend") and not has_any_word(question, ("apy", "yield")):
         return "dividend" in f
-    if re.search(r"\brate\b", q) and "interest rate" in q:
+    if has_word(question, "rate") and has_any_word(question, ("interest",)):
         return any(x in f for x in ("rate", "apy", "apr", "dividend", "yield"))
     return True
 
 
 def _row_matches(subject: str, section: str, url: str, question: str) -> bool:
-    q = question.lower()
     blob = f"{subject} {section} {url}".lower()
     qtoks = {t for t in tokenize(question) if len(t) > 2 and t not in GENERIC}
     if not qtoks:
         return True
-    if "mortgage" in qtoks or "mortgage" in q:
+    if has_word(question, "mortgage"):
         return "home-loan" in url.lower()
-    if "certificate" in q or "jumbo" in q:
+    if has_any_word(question, ("certificate", "jumbo")):
         return any(x in blob for x in ("month", "jumbo", "certificate", "special"))
-    if "share" in q and "savings" in q:
+    if has_word(question, "share") and has_word(question, "savings"):
         return "share" in blob and "savings" in blob
-    if "money market" in q:
+    if has_word(question, "money") and has_word(question, "market"):
         return "money" in blob and "market" in blob
-    if "hsa" in q:
+    if has_word(question, "hsa"):
         return "hsa" in blob
-    if "card" in q or "visa" in q:
-        if "business" in q:
+    if has_any_word(question, ("card", "visa")):
+        if has_word(question, "business"):
             return "business" in url.lower()
         if "business" in url.lower():
             return False
         return "personal" in url.lower() or "credit-card" in url.lower()
-    if any(x in q for x in ("boat", "recreational", "rv")):
+    if has_any_word(question, ("boat", "recreational")) or (
+        has_word(question, "rv") and not has_any_word(question, ("service", "serve", "reserve"))
+    ):
         return "recreational" in url.lower()
-    if any(x in q for x in ("auto", "vehicle", "motorcycle")):
+    if has_any_word(question, ("auto", "vehicle", "motorcycle")):
         return "auto" in url.lower() or "motorcycle" in url.lower()
     overlap = qtoks & set(tokenize(blob))
     return len(overlap) >= 1
 
 
+PRODUCT_STOP = GENERIC | frozenset(
+    {
+        "loan", "loans", "rate", "rates", "option", "options", "flexible", "flexibility",
+        "offer", "offers", "have", "with", "going", "university", "college", "member",
+        "membership", "website", "page", "list", "types", "kind", "kinds",
+    }
+)
+
+
+def _product_tokens(question: str) -> list[str]:
+    return [t for t in tokenize(question) if len(t) >= 4 and t not in PRODUCT_STOP]
+
+
 def _label_matches_question(label_blob: str, question: str) -> bool:
+    if is_list_question(question):
+        return True
+    if not is_rate_question(question):
+        return True
     q = question.lower()
     b = label_blob.lower()
-    tiered = (
-        "between" in q
-        or "model" in q
-        or "rewards" in q
-        or "platinum" in q
-        or "jumbo" in q
-        or bool(re.search(r"\b\d+\s*-?\s*month", q))
-        or ("share" in q and "savings" in q)
-    )
-    if not tiered:
-        return True
-    if "share" in q and "savings" in q and ("share" not in b or "savings" not in b):
-        return False
     m = re.search(r"\b(\d+)\s*-?\s*month", q)
     if m and m.group(1) not in b and f"{m.group(1)} month" not in b:
         return False
-    if "model" in q:
+    if has_word(question, "model"):
         ym = re.search(r"\b(20\d{2})\b", q)
         rng = re.search(r"(20\d{2})\s*[-–/]\s*(\d{2,4})", b)
         if ym and rng:
@@ -173,29 +178,17 @@ def _label_matches_question(label_blob: str, question: str) -> bool:
             y2 = int(tail) if len(tail) == 4 else y1 // 100 * 100 + int(tail)
             if not (y1 <= y <= y2):
                 return False
-    if "rewards" in q and "platinum" in b and "rewards" not in b:
-        return False
-    if "platinum" in q and "rewards" in b and "platinum" not in b:
-        return False
-    amounts = [
-        int(x.replace(",", ""))
-        for x in re.findall(r"\$?\s*([\d,]+)", q)
-        if x.replace(",", "").isdigit() and int(x.replace(",", "")) >= 1000
-    ]
-    if len(amounts) >= 2 and "between" in q:
-        lo, hi = sorted(amounts[:2])
-        if str(lo) not in re.sub(r"[^\d]", "", b) and str(hi) not in re.sub(r"[^\d]", "", b):
-            return False
-    elif amounts and ("up to" in q or "under" in q or "less than" in q):
-        if not any(str(a) in re.sub(r"[^\d]", "", b) for a in amounts):
-            pass
-    if re.search(r"\b(\d+)\s*-?\s*month", q) and re.search(r"between\s+\$", q):
+    if has_word(question, "between"):
         lo = re.search(r"between\s+\$?\s*([\d,]+)", q)
         hi = re.search(r"and\s+\$?\s*([\d,]+)", q)
-        if lo and lo.group(1).replace(",", "") not in re.sub(r"[^\d]", "", b):
+        digits = re.sub(r"[^\d]", "", b)
+        if lo and lo.group(1).replace(",", "") not in digits:
             return False
-        if hi and hi.group(1).replace(",", "") not in re.sub(r"[^\d]", "", b):
+        if hi and hi.group(1).replace(",", "") not in digits:
             return False
+    tokens = _product_tokens(question)
+    if tokens and not any(t in b for t in tokens):
+        return False
     return True
 
 
@@ -223,18 +216,18 @@ def _window_around_number(text: str, num: tuple[str, float], radius: int = 120) 
 
 
 def _prose_column_ok(text: str, question: str, num: tuple[str, float]) -> bool:
-    q = question.lower()
     win = _window_around_number(text, num).lower()
-    if re.search(r"\bapy\b|\byield\b", q):
+    if has_any_word(question, ("apy", "yield")):
         return "apy" in win or "yield" in win
-    if re.search(r"\bapr\b", q):
+    if has_word(question, "apr"):
         return "apr" in win
-    if "dividend" in q and "apy" not in q:
+    if has_word(question, "dividend") and not has_any_word(question, ("apy", "yield")):
         return "dividend" in win
     return True
 
 
 def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) -> bool:
+    list_q = is_list_question(question)
     for fe in pack.facts:
         if _fact_grounds_rate(fe, num, question):
             return True
@@ -251,7 +244,7 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
         if not _row_matches("", ce.chunk.text[:500], ce.chunk.url, question):
             continue
         win = _window_around_number(ce.chunk.text, num)
-        if not _label_matches_question(win, question) and not _label_matches_question(
+        if not list_q and not _label_matches_question(win, question) and not _label_matches_question(
             ce.chunk.text[:900], question
         ):
             continue
@@ -311,10 +304,52 @@ def _location_corpus(pack: EvidencePack) -> str:
     return " ".join(parts).lower()
 
 
+def _branch_hours_for_place(place: str, pack: EvidencePack) -> bool:
+    p = place.lower()
+    for fe in pack.facts:
+        if fe.fact.field.lower() != "hours":
+            continue
+        blob = f"{fe.fact.subject} {fe.fact.value}".lower()
+        if p in blob:
+            return True
+    return False
+
+
+def _general_hours_snippet(pack: EvidencePack) -> str | None:
+    for fe in pack.facts:
+        if fe.fact.field.lower() == "hours" and fe.fact.value.strip():
+            return fe.fact.value.strip()[:120]
+    return None
+
+
+def _adjust_branch_hours_answer(
+    answer: Answer, question: str, pack: EvidencePack
+) -> Answer:
+    if not is_hours_question(question) or not answer.confident:
+        return answer
+    places = _named_places(question)
+    if len(places) != 1:
+        return answer
+    place = places[0]
+    if not _place_in_corpus(place, _location_corpus(pack)):
+        return answer
+    if _branch_hours_for_place(place, pack):
+        return answer
+    if not TIME_TOKEN.search(answer.text):
+        return answer
+    msg = (
+        f"The site does not list hours specifically for the {place.title()} branch."
+    )
+    gen = _general_hours_snippet(pack)
+    if gen:
+        msg += f" General hours on the site: {gen}"
+    return Answer(text=msg, sources=answer.sources, confident=True)
+
+
 def _unknown_place_in_question(question: str, pack: EvidencePack) -> bool:
-    if not any(
-        k in question.lower()
-        for k in ("branch", "lobby", "hours", "address", "street", "avenue", "named")
+    if not has_any_word(
+        question,
+        ("branch", "lobby", "hours", "address", "street", "avenue", "named"),
     ):
         return False
     places = _named_places(question)
@@ -372,6 +407,7 @@ def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer
             if not _substr_in_corpus(zm.group(0), corpus):
                 return _refuse(answer)
 
+    answer = _adjust_branch_hours_answer(answer, question, pack)
     if answer.confident:
         return answer
     return sanitize_refusal(answer)

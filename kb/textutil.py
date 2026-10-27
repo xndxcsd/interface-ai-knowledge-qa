@@ -38,6 +38,14 @@ def tokenize(text: str) -> list[str]:
     return WORD.findall(text.lower())
 
 
+def has_word(text: str, word: str) -> bool:
+    return re.search(rf"\b{re.escape(word)}\b", text, re.I) is not None
+
+
+def has_any_word(text: str, words: tuple[str, ...] | list[str]) -> bool:
+    return any(has_word(text, w) for w in words)
+
+
 def split_paragraphs(md: str) -> list[str]:
     parts = re.split(r"\n\s*\n", md or "")
     return [p.strip() for p in parts if p.strip()]

@@ -156,9 +156,16 @@ class KnowledgeStore:
         tokens: list[list[str]] = []
         cid = 0
         for page in corpus:
-            for ch in split_chunks(page.markdown):
-                text = clean_markdown(ch)
-                if len(text) < 40:
+            is_news = "/newsroom/" in page.canonical.lower()
+            max_chars = 520 if is_news else 900
+            prefix = ""
+            if is_news:
+                title = (page.title or "").strip()
+                prefix = f"Title: {title} Date: {page.taken_on}\n\n" if title else f"Date: {page.taken_on}\n\n"
+            for ch in split_chunks(page.markdown, max_chars=max_chars):
+                body = clean_markdown(ch)
+                text = f"{prefix}{body}".strip()
+                if len(body) < 40:
                     continue
                 chunks.append(
                     ChunkRecord(

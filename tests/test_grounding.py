@@ -191,6 +191,29 @@ def test_rewards_visa_prose_range():
     assert out.confident
 
 
+def test_auto_not_routed_to_recreational_on_substring():
+    f = ExtractedFact(
+        subject="2024-27 Model Year | 60 Months",
+        field="Annual Percentage Rate (As Low As)",
+        value="5.39% APR1",
+        raw_row="| ... |",
+        section="Rates",
+        effective_date=None,
+        url="https://www.example.com/personal/loans/auto-motorcycle-loans",
+        snapshot_id="s1",
+        taken_on="2026-09-28",
+        authority=1.0,
+    )
+    pack = EvidencePack(facts=[FactEvidence(f, 1.0)], chunks=[], as_of=None)
+    ans = Answer(text="5.39% APR.", sources=[], confident=True)
+    out = apply_grounding(
+        ans,
+        pack,
+        "Do you reserve special loan options for member service?",
+    )
+    assert out.confident
+
+
 def test_confident_answer_not_sanitized():
     ans = Answer(text="The rate is 5.39% APR.", sources=[], confident=True)
     out = sanitize_refusal(ans)

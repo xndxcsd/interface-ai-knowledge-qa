@@ -52,7 +52,7 @@ def canonical_path_hints(question: str) -> list[str]:
         (("branch", "lobby", "atm", "locator", "address"), "contact"),
         (("join", "membership", "eligible"), "about/join"),
         (("wallet", "mobile"), "connect/online-and-mobile-banking"),
-        (("student", "college"), "personal/loans"),
+        (("student", "college"), "personal/loans/personal-loans"),
         (("savings",), "personal/savings-account"),
     )
     for keys, path in pairs:

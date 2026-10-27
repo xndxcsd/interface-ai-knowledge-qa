@@ -12,7 +12,7 @@ from kb.retrieval_hints import (
     is_hours_question,
     is_list_question,
 )
-from kb.textutil import tokenize
+from kb.textutil import has_any_word, has_word, tokenize
 
 if TYPE_CHECKING:
     from kb.facts import ExtractedFact
@@ -69,20 +69,21 @@ def score_fact(
     ql = question.lower()
     if f.field.lower() == "hours" and is_hours_question(question):
         bonus += 0.85
-        if "drive" in ql and "drive" in f.value.lower():
+        if has_word(ql, "drive") and has_word(f.value, "drive"):
             bonus += 0.5
     return (overlap + bonus) * auth
 
 
 def is_rate_question(question: str) -> bool:
-    q = question.lower()
-    return any(
-        k in q
-        for k in (
-            "rate", "apy", "apr", "dividend", "interest", "yield", "percent",
-            "%", "loan", "mortgage", "certificate", "cd", "checking", "savings",
-        )
-    )
+    q = question
+    if has_any_word(
+        q,
+        ("rate", "rates", "apy", "apr", "dividend", "interest", "yield", "percent"),
+    ):
+        return True
+    if has_word(q, "cd") or has_word(q, "certificate"):
+        return True
+    return "%" in q
 
 
 def _chunk_priority(text: str) -> tuple[int, int, int, int]:
@@ -95,7 +96,15 @@ def _chunk_priority(text: str) -> tuple[int, int, int, int]:
     )
 
 
-def _inject_page_chunks(page, chunk_hits: list, *, extra: bool = False) -> None:
+def _hint_path_score(path_hint: str, url: str, q_tokens: set[str]) -> int:
+    hint = path_hint.lower().replace("/", " ")
+    u = url.lower()
+    return sum(1 for t in q_tokens if len(t) > 2 and (t in hint or t in u))
+
+
+def _inject_page_chunks(
+    page, chunk_hits: list, *, extra: bool = False, inject_score: float = 2.0
+) -> None:
     from kb.textutil import clean_markdown, split_chunks
     from kb.system import ChunkRecord
 
@@ -117,7 +126,7 @@ def _inject_page_chunks(page, chunk_hits: list, *, extra: bool = False) -> None:
             authority=page.authority,
             stale_for_rates=page.stale_for_rates,
         )
-        chunk_hits.append((cr, 28.0 * page.authority))
+        chunk_hits.append((cr, inject_score * page.authority))
         added += 1
 
 
@@ -139,7 +148,7 @@ def gather_evidence(
     rate_q = is_rate_question(question)
     path_hints = canonical_path_hints(question)
     if rate_q and path_hints and not list_q:
-        max_facts = max(max_facts, 18)
+        max_facts = max(max_facts, 16)
 
     def score_all_facts():
         facts_raw = store.facts_as_of_ranked(as_of)
@@ -160,10 +169,14 @@ def gather_evidence(
                     seen.add(key)
                     scored.append(FactEvidence(f, s))
         scored.sort(key=lambda x: x.score, reverse=True)
-        if rate_q and path_hints:
-            hinted = [fe for fe in scored if any(h in fe.fact.url.lower() for h in path_hints)]
-            other = [fe for fe in scored if fe not in hinted]
-            scored = sorted(hinted, key=lambda x: -x.score) + sorted(other, key=lambda x: -x.score)
+        if rate_q and path_hints and not list_q:
+
+            def fact_hint_rank(fe: FactEvidence) -> tuple[int, float]:
+                url = fe.fact.url.lower()
+                rel = max(_hint_path_score(h, url, q_tokens) for h in path_hints)
+                return (rel, fe.score)
+
+            scored.sort(key=fact_hint_rank, reverse=True)
         return scored[:max_facts]
 
     def search_chunks():
@@ -188,7 +201,9 @@ def gather_evidence(
                     s = score_fact(f, q_tokens, question, rate_question=rate_q) + 0.65
                     scored_facts.append(FactEvidence(f, s))
         for page in hint_pages:
-            _inject_page_chunks(page, chunk_hits, extra=True)
+            rel = max(_hint_path_score(h, page.url, q_tokens) for h in path_hints)
+            boost = 24.0 if rel > 0 else 2.0
+            _inject_page_chunks(page, chunk_hits, extra=True, inject_score=boost)
         seen_f = set()
         merged: list[FactEvidence] = []
         for fe in sorted(scored_facts, key=lambda x: x.score, reverse=True):
@@ -199,16 +214,26 @@ def gather_evidence(
         scored_facts = merged[:max_facts]
     else:
         for page in hint_pages:
-            _inject_page_chunks(page, chunk_hits, extra=rate_q or list_q)
+            if list_q:
+                rel = max(_hint_path_score(h, page.url, q_tokens) for h in path_hints)
+                _inject_page_chunks(
+                    page, chunk_hits, extra=True, inject_score=24.0 if rel > 0 else 2.0
+                )
+            elif rate_q and path_hints:
+                rel = max(_hint_path_score(h, page.url, q_tokens) for h in path_hints)
+                if rel > 0:
+                    _inject_page_chunks(page, chunk_hits, extra=True, inject_score=24.0)
+            else:
+                _inject_page_chunks(page, chunk_hits, extra=False)
 
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
         weight = ch.authority * (0.15 if (rate_q and ch.stale_for_rates) else 1.0)
         chunks.append(ChunkEvidence(ch, bm25_score * weight))
-    if rate_q and path_hints:
+    if rate_q and path_hints and not list_q:
         chunks.sort(
             key=lambda c: (
-                any(h in c.chunk.url.lower() for h in path_hints),
+                max(_hint_path_score(h, c.chunk.url, q_tokens) for h in path_hints),
                 c.score,
                 c.chunk.taken_on,
             ),
