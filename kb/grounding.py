@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 from contract import Answer
 
-from kb.evidence import EvidencePack, is_rate_question
+from kb.evidence import EvidencePack, FactEvidence, is_rate_question
 from kb.textutil import tokenize
 
 NUM = re.compile(r"(\$)?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d+))?\s*(%|percent)?", re.I)
@@ -35,6 +35,14 @@ GENERIC = frozenset(
         "branch", "street", "address", "hours", "lobby", "drive", "main", "named",
     }
 )
+PLACE_SKIP = GENERIC | frozenset(
+    {
+        "which", "every", "specific", "typical", "general", "exact", "store",
+        "through", "branches", "lobby", "avenue",
+    }
+)
+
+
 def _numbers(text: str) -> set[tuple[str, float]]:
     out: set[tuple[str, float]] = set()
     for m in NUM.finditer(text or ""):
@@ -128,7 +136,7 @@ def _row_matches(subject: str, section: str, url: str, question: str) -> bool:
         if "business" in url.lower():
             return False
         return "personal" in url.lower() or "credit-card" in url.lower()
-    if any(x in q for x in ("boat", "recreational")):
+    if any(x in q for x in ("boat", "recreational", "rv")):
         return "recreational" in url.lower()
     if any(x in q for x in ("auto", "vehicle", "motorcycle")):
         return "auto" in url.lower() or "motorcycle" in url.lower()
@@ -136,7 +144,74 @@ def _row_matches(subject: str, section: str, url: str, question: str) -> bool:
     return len(overlap) >= 1
 
 
-def _window_around_number(text: str, num: tuple[str, float], radius: int = 90) -> str:
+def _label_matches_question(label_blob: str, question: str) -> bool:
+    q = question.lower()
+    b = label_blob.lower()
+    tiered = (
+        "between" in q
+        or "model" in q
+        or "rewards" in q
+        or "platinum" in q
+        or "jumbo" in q
+        or bool(re.search(r"\b\d+\s*-?\s*month", q))
+        or ("share" in q and "savings" in q)
+    )
+    if not tiered:
+        return True
+    if "share" in q and "savings" in q and ("share" not in b or "savings" not in b):
+        return False
+    m = re.search(r"\b(\d+)\s*-?\s*month", q)
+    if m and m.group(1) not in b and f"{m.group(1)} month" not in b:
+        return False
+    if "model" in q:
+        ym = re.search(r"\b(20\d{2})\b", q)
+        rng = re.search(r"(20\d{2})\s*[-–/]\s*(\d{2,4})", b)
+        if ym and rng:
+            y = int(ym.group(1))
+            y1 = int(rng.group(1))
+            tail = rng.group(2)
+            y2 = int(tail) if len(tail) == 4 else y1 // 100 * 100 + int(tail)
+            if not (y1 <= y <= y2):
+                return False
+    if "rewards" in q and "platinum" in b and "rewards" not in b:
+        return False
+    if "platinum" in q and "rewards" in b and "platinum" not in b:
+        return False
+    amounts = [
+        int(x.replace(",", ""))
+        for x in re.findall(r"\$?\s*([\d,]+)", q)
+        if x.replace(",", "").isdigit() and int(x.replace(",", "")) >= 1000
+    ]
+    if len(amounts) >= 2 and "between" in q:
+        lo, hi = sorted(amounts[:2])
+        if str(lo) not in re.sub(r"[^\d]", "", b) and str(hi) not in re.sub(r"[^\d]", "", b):
+            return False
+    elif amounts and ("up to" in q or "under" in q or "less than" in q):
+        if not any(str(a) in re.sub(r"[^\d]", "", b) for a in amounts):
+            pass
+    if re.search(r"\b(\d+)\s*-?\s*month", q) and re.search(r"between\s+\$", q):
+        lo = re.search(r"between\s+\$?\s*([\d,]+)", q)
+        hi = re.search(r"and\s+\$?\s*([\d,]+)", q)
+        if lo and lo.group(1).replace(",", "") not in re.sub(r"[^\d]", "", b):
+            return False
+        if hi and hi.group(1).replace(",", "") not in re.sub(r"[^\d]", "", b):
+            return False
+    return True
+
+
+def _fact_grounds_rate(fe: FactEvidence, num: tuple[str, float], question: str) -> bool:
+    f = fe.fact
+    if num not in _numbers(f.value):
+        return False
+    blob = f"{f.subject} {f.raw_row} {f.section}"
+    return (
+        _column_matches(f.field, question)
+        and _row_matches(f.subject, f.section, f.url, question)
+        and _label_matches_question(blob, question)
+    )
+
+
+def _window_around_number(text: str, num: tuple[str, float], radius: int = 120) -> str:
     target = str(num[1]).rstrip("0").rstrip(".")
     for m in NUM.finditer(text):
         unit = "%" if m.group(4) else ""
@@ -144,7 +219,7 @@ def _window_around_number(text: str, num: tuple[str, float], radius: int = 90) -
         if (unit, round(val, 4)) == num or target in m.group(0):
             start = max(0, m.start() - radius)
             return text[start : m.end() + radius]
-    return text[:180]
+    return text[:220]
 
 
 def _prose_column_ok(text: str, question: str, num: tuple[str, float]) -> bool:
@@ -161,14 +236,10 @@ def _prose_column_ok(text: str, question: str, num: tuple[str, float]) -> bool:
 
 def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) -> bool:
     for fe in pack.facts:
-        if num not in _numbers(fe.fact.value):
-            continue
-        f = fe.fact
-        if _column_matches(f.field, question) and _row_matches(
-            f.subject, f.section, f.url, question
-        ):
+        if _fact_grounds_rate(fe, num, question):
             return True
-    urls_with_table = {
+
+    table_urls_with_num = {
         fe.fact.url.rstrip("/")
         for fe in pack.facts
         if num in _numbers(fe.fact.value)
@@ -177,9 +248,20 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
         if num not in _numbers(ce.chunk.text):
             continue
         url = ce.chunk.url.rstrip("/")
-        if not _row_matches("", ce.chunk.text[:400], ce.chunk.url, question):
+        if not _row_matches("", ce.chunk.text[:500], ce.chunk.url, question):
             continue
-        if url in urls_with_table:
+        win = _window_around_number(ce.chunk.text, num)
+        if not _label_matches_question(win, question) and not _label_matches_question(
+            ce.chunk.text[:900], question
+        ):
+            continue
+        if url in table_urls_with_num:
+            if any(
+                _fact_grounds_rate(fe, num, question)
+                for fe in pack.facts
+                if fe.fact.url.rstrip("/") == url
+            ):
+                return True
             continue
         if _prose_column_ok(ce.chunk.text, question, num):
             return True
@@ -187,30 +269,35 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
 
 
 def _named_places(question: str) -> list[str]:
-    q = re.sub(r"\bDupaco(?:'s|s)\b", "", question, flags=re.I)
-    places: list[str] = []
-    for m in re.finditer(
-        r"\b([A-Z][A-Za-z'\-]+)\s+(?:Branch|branch|Avenue|Street|St\.|Blvd\.|Road|Rd\.)\b",
-        q,
-    ):
-        places.append(m.group(1).lower().rstrip("'s"))
-    for m in re.finditer(
-        r"(?:branch|lobby|hours)\s+(?:for|at|on)\s+(?:the\s+)?([A-Z][A-Za-z'\-]{4,})\b",
-        q,
-        re.I,
-    ):
-        places.append(m.group(1).lower().rstrip("'s"))
-    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+),\s*([A-Z]{2})\b", q):
-        places.append(m.group(1).lower().rstrip("'s"))
-    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+)\s+branch\b", q, re.I):
-        places.append(m.group(1).lower().rstrip("'s"))
-    out: list[str] = []
-    for p in places:
-        if p == "dupaco" or len(p) < 5:
+    q = re.sub(r"\bDupaco(?:'s)\b", "", question)
+    raw: list[str] = []
+    for m in re.finditer(r"\b([A-Z][A-Za-z]+(?:-[A-Z][A-Za-z]+)+)\b", q):
+        raw.append(m.group(1))
+    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+),\s*([A-Z]{2}|[A-Z][a-z]+)\b", q):
+        raw.append(m.group(1))
+    for m in re.finditer(r"\b([A-Z][A-Za-z'\-]+)\s+[Bb]ranch\b", q):
+        if m.start() >= 2 and q[m.start() - 2 : m.start()] == ", ":
             continue
-        if p not in out:
-            out.append(p)
+        raw.append(m.group(1))
+    for m in re.finditer(r"\bnamed\s+([A-Z][A-Za-z'\-]+)\b", q):
+        raw.append(m.group(1))
+    for m in re.finditer(
+        r"(?:branch|lobby|hours)\s+(?:for|at|on)\s+(?:the\s+)?([A-Z][A-Za-z'\-]{3,})\b",
+        q,
+    ):
+        raw.append(m.group(1))
+    out: list[str] = []
+    for p in raw:
+        key = p.lower()
+        if key in PLACE_SKIP or key == "dupaco" or len(key) < 3:
+            continue
+        if key not in out:
+            out.append(key)
     return out
+
+
+def _place_in_corpus(place: str, corpus: str) -> bool:
+    return place in corpus or place.replace("-", " ") in corpus
 
 
 def _location_corpus(pack: EvidencePack) -> str:
@@ -234,10 +321,7 @@ def _unknown_place_in_question(question: str, pack: EvidencePack) -> bool:
     if not places:
         return False
     corpus = _location_corpus(pack)
-    for p in places:
-        if p not in corpus and p.replace("-", " ") not in corpus:
-            return True
-    return False
+    return any(not _place_in_corpus(p, corpus) for p in places)
 
 
 def _refuse(answer: Answer) -> Answer:
@@ -257,7 +341,6 @@ def sanitize_refusal(answer: Answer) -> Answer:
 
 
 def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer:
-    answer = sanitize_refusal(answer)
     if not answer.text:
         return Answer(text=REFUSAL, sources=[], confident=False)
 
@@ -289,7 +372,9 @@ def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer
             if not _substr_in_corpus(zm.group(0), corpus):
                 return _refuse(answer)
 
-    return answer
+    if answer.confident:
+        return answer
+    return sanitize_refusal(answer)
 
 
 def postcheck_answer(answer: Answer, pack: EvidencePack, question: str) -> Answer:

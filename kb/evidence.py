@@ -85,11 +85,26 @@ def is_rate_question(question: str) -> bool:
     )
 
 
+def _chunk_priority(text: str) -> tuple[int, int, int, int]:
+    low = text.lower()
+    return (
+        1 if "|" in text and "%" in text else 0,
+        min(text.count("%"), 6),
+        1 if "apr" in low or "apy" in low else 0,
+        len(text),
+    )
+
+
 def _inject_page_chunks(page, chunk_hits: list, *, extra: bool = False) -> None:
     from kb.textutil import clean_markdown, split_chunks
     from kb.system import ChunkRecord
 
-    for part in split_chunks(page.markdown)[:3 if extra else 2]:
+    parts = sorted(split_chunks(page.markdown), key=_chunk_priority, reverse=True)
+    n = 4 if extra else 2
+    added = 0
+    for part in parts:
+        if added >= n:
+            break
         text = clean_markdown(part)
         if len(text) < 50:
             continue
@@ -102,8 +117,8 @@ def _inject_page_chunks(page, chunk_hits: list, *, extra: bool = False) -> None:
             authority=page.authority,
             stale_for_rates=page.stale_for_rates,
         )
-        chunk_hits.append((cr, 2.0 * page.authority))
-        break
+        chunk_hits.append((cr, 28.0 * page.authority))
+        added += 1
 
 
 def gather_evidence(
@@ -123,6 +138,8 @@ def gather_evidence(
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
     path_hints = canonical_path_hints(question)
+    if rate_q and path_hints and not list_q:
+        max_facts = max(max_facts, 18)
 
     def score_all_facts():
         facts_raw = store.facts_as_of_ranked(as_of)
@@ -143,6 +160,10 @@ def gather_evidence(
                     seen.add(key)
                     scored.append(FactEvidence(f, s))
         scored.sort(key=lambda x: x.score, reverse=True)
+        if rate_q and path_hints:
+            hinted = [fe for fe in scored if any(h in fe.fact.url.lower() for h in path_hints)]
+            other = [fe for fe in scored if fe not in hinted]
+            scored = sorted(hinted, key=lambda x: -x.score) + sorted(other, key=lambda x: -x.score)
         return scored[:max_facts]
 
     def search_chunks():
@@ -178,13 +199,23 @@ def gather_evidence(
         scored_facts = merged[:max_facts]
     else:
         for page in hint_pages:
-            _inject_page_chunks(page, chunk_hits)
+            _inject_page_chunks(page, chunk_hits, extra=rate_q or list_q)
 
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
         weight = ch.authority * (0.15 if (rate_q and ch.stale_for_rates) else 1.0)
         chunks.append(ChunkEvidence(ch, bm25_score * weight))
-    chunks.sort(key=lambda c: (c.score, c.chunk.taken_on), reverse=True)
+    if rate_q and path_hints:
+        chunks.sort(
+            key=lambda c: (
+                any(h in c.chunk.url.lower() for h in path_hints),
+                c.score,
+                c.chunk.taken_on,
+            ),
+            reverse=True,
+        )
+    else:
+        chunks.sort(key=lambda c: (c.score, c.chunk.taken_on), reverse=True)
     return EvidencePack(facts=scored_facts, chunks=chunks[:max_chunks], as_of=as_of)
 
 

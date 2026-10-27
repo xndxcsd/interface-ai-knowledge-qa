@@ -43,7 +43,8 @@ def get_llm_client() -> ChatClient | None:
 SYSTEM_PROMPT = """You answer member questions using ONLY the evidence block.
 
 Rules:
-- Use the evidence row label (row=), column name, page URL, and section to pick the product/tier/term that matches the question.
+- Use row= labels to match the question's term, tier/balance band, model year, and product name; do not borrow a nearby row.
+- If no evidence row matches the tier/term asked for, set confident=false and say the rate is not listed.
 - If the question asks for APY or yield, use the APY/yield column—not dividend rate alone. If it asks APR, use the APR column.
 - Prefer the newest snapshot_id and highest-authority rows when rows disagree.
 - Quote numbers, times, phones, addresses, and URLs exactly as they appear in the evidence you use.

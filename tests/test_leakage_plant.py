@@ -1,7 +1,6 @@
 """Distinctive eval gold tokens and planted phrases must be in the banned set / caught."""
 from __future__ import annotations
 
-import re
 import tempfile
 from pathlib import Path
 
@@ -9,6 +8,8 @@ from tests.test_no_eval_leakage import (
     SCAN,
     _banned_from_eval,
     _literals_in_python,
+    _split_token_groups,
+    scan_path_for_violations,
     token_in_banned,
 )
 
@@ -40,28 +41,33 @@ def test_planted_literals_in_source_would_fail():
         "fifth",
         "join.dupaco.com",
         "Forbes fifth time",
+        "Oldenburg",
     ]
     banned = _banned_from_eval()
+    split_groups = _split_token_groups(banned)
     for plant in plants:
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
             f.write(f'X = "{plant}"\n')
             path = Path(f.name)
         lits = _literals_in_python(path)
-        path.unlink(missing_ok=True)
         assert plant.lower() in lits, plant
         assert token_in_banned(plant, banned), plant
+        assert scan_path_for_violations(path, banned, split_groups), plant
+        path.unlink(missing_ok=True)
 
 
 def test_split_token_evasion_would_fail():
     banned = _banned_from_eval()
+    split_groups = _split_token_groups(banned)
     assert token_in_banned("hy-vee", banned)
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
-        f.write('if "hy" in q and "vee" in q:\n    pass\n')
-        path = Path(f.name)
-    lits = _literals_in_python(path)
-    path.unlink(missing_ok=True)
-    from tests.test_no_eval_leakage import _split_token_groups, _whole_words
-
-    words = _whole_words(lits)
-    groups = _split_token_groups(banned)
-    assert any(all(p in words for p in parts) for parts in groups if "hy" in parts)
+    assert token_in_banned("oldenburg", banned)
+    for src in (
+        'if "hy" in q and "vee" in q:\n    pass\n',
+        'a, b = "olden", "burg"\n',
+    ):
+        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
+            f.write(src)
+            path = Path(f.name)
+        v = scan_path_for_violations(path, banned, split_groups)
+        path.unlink(missing_ok=True)
+        assert v, src

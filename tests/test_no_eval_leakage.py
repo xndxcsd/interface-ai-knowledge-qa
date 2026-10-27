@@ -49,7 +49,7 @@ COMMON_TITLE = frozenset(
     }
 )
 SPLIT_STOP = frozenset(
-    COMMON_TITLE | ALLOW | {"up", "lab", "mon", "fri", "thu", "tue", "wed", "or", "less"}
+    COMMON_TITLE | ALLOW | {"up", "lab", "mon", "fri", "thu", "tue", "wed", "or", "less", "in", "store"}
 )
 
 
@@ -155,9 +155,14 @@ def _tokens_from_expected_answer(raw: str) -> set[str]:
     if len(low) >= 16:
         out.add(low)
     for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
-        out.add(m.group(0).lower())
+        phrase = m.group(0).lower()
+        out.add(phrase)
+        for w in phrase.split():
+            if len(w) >= 5 and w not in COMMON_TITLE:
+                out.add(w)
     for m in TIME_RANGE.finditer(s):
         out.add(re.sub(r"\s+", " ", m.group(0).lower()))
+    out |= _distinctive_proper_nouns(s)
     return {t for t in out if t and t not in ALLOW}
 
 
@@ -198,13 +203,23 @@ def _banned_from_eval() -> set[str]:
 
 def _split_token_groups(banned: set[str]) -> list[tuple[str, ...]]:
     groups: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
     for tok in banned:
-        if "-" not in tok:
-            continue
-        parts = [p for p in tok.split("-") if len(p) >= 2]
-        if len(parts) < 2 or any(p in SPLIT_STOP for p in parts):
-            continue
-        groups.append(tuple(parts))
+        if "-" in tok:
+            parts = tuple(p for p in tok.split("-") if len(p) >= 2)
+            if len(parts) >= 2 and not any(p in SPLIT_STOP for p in parts):
+                if parts not in seen:
+                    seen.add(parts)
+                    groups.append(parts)
+        if tok.isalpha() and len(tok) >= 8:
+            for i in range(3, len(tok) - 2):
+                parts = (tok[:i], tok[i:])
+                if len(parts[0]) >= 4 and len(parts[1]) >= 3 and not any(
+                    p in SPLIT_STOP for p in parts
+                ):
+                    if parts not in seen:
+                        seen.add(parts)
+                        groups.append(parts)
     return groups
 
 
@@ -212,31 +227,37 @@ def _whole_words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9'.-]+", text.lower()))
 
 
+def scan_path_for_violations(path: Path, banned: set[str], split_groups: list[tuple[str, ...]]) -> list[str]:
+    violations: list[str] = []
+    lits = _literals_in_python(path)
+    comments = _comments_in_python(path)
+    combined = lits + "\n" + comments
+    words = _whole_words(combined)
+    whole = path.read_text(encoding="utf-8").lower()
+    for tok in banned:
+        if len(tok) >= 9 and tok.isdigit():
+            if tok in whole:
+                violations.append(f"{path.name}: {tok!r}")
+        elif len(tok) >= 4 and re.search(
+            rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", combined
+        ):
+            violations.append(f"{path.name}: {tok!r}")
+        elif "dupaco.com" in tok and tok in combined:
+            violations.append(f"{path.name}: {tok!r}")
+    for parts in split_groups:
+        if all(p in words for p in parts):
+            violations.append(
+                f"{path.name}: split tokens {parts!r} (evasion of compound eval phrase)"
+            )
+    return violations
+
+
 def test_no_eval_literals_in_kb_source():
     banned = _banned_from_eval()
     split_groups = _split_token_groups(banned)
     violations: list[str] = []
     for path in SCAN:
-        lits = _literals_in_python(path)
-        comments = _comments_in_python(path)
-        combined = lits + "\n" + comments
-        words = _whole_words(combined)
-        whole = path.read_text(encoding="utf-8").lower()
-        for tok in banned:
-            if len(tok) >= 9 and tok.isdigit():
-                if tok in whole:
-                    violations.append(f"{path.name}: {tok!r}")
-            elif len(tok) >= 4 and re.search(
-                rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", combined
-            ):
-                violations.append(f"{path.name}: {tok!r}")
-            elif "dupaco.com" in tok and tok in combined:
-                violations.append(f"{path.name}: {tok!r}")
-        for parts in split_groups:
-            if all(p in words for p in parts):
-                violations.append(
-                    f"{path.name}: split tokens {parts!r} (evasion of compound eval phrase)"
-                )
+        violations.extend(scan_path_for_violations(path, banned, split_groups))
     assert not violations, "Eval leakage in string literals:\n" + "\n".join(
         sorted(set(violations))
     )

@@ -22,6 +22,7 @@ RATE_CANONICAL_PATHS = (
     "/personal/loans/home-loans",
     "/personal/loans/auto-motorcycle-loans",
     "/personal/loans/personal-loans",
+    "/personal/loans/recreational-loans",
     "/personal/credit-cards",
     "/business/credit-cards",
     "/business/cash-management",

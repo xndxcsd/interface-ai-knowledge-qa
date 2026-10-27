@@ -135,7 +135,63 @@ def test_refuses_unknown_branch_hours():
     out = apply_grounding(
         ans,
         pack,
-        "What are the lobby hours at the Mullan branch?",
+        "What are the lobby hours at the branch named Mullan?",
     )
     assert not out.confident
     assert out.text == "I don't know."
+
+
+def test_galena_branch_not_false_refusal():
+    pack = EvidencePack(
+        facts=[
+            FactEvidence(
+                ExtractedFact(
+                    subject="Galena Branch",
+                    field="hours",
+                    value="Lobby 9 a.m.–5 p.m.",
+                    raw_row="",
+                    section="",
+                    effective_date=None,
+                    url="https://www.example.com/contact",
+                    snapshot_id="s1",
+                    taken_on="2026-01-01",
+                    authority=1.0,
+                ),
+                1.0,
+            )
+        ],
+        chunks=[],
+        as_of=None,
+    )
+    ans = Answer(text="Lobby 9 a.m.–5 p.m.", sources=[], confident=True)
+    out = apply_grounding(
+        ans,
+        pack,
+        "What are the lobby hours at the Galena, Illinois branch?",
+    )
+    assert out.confident
+
+
+def test_rewards_visa_prose_range():
+    chunk = ChunkRecord(
+        chunk_id=1,
+        text=(
+            "### Rewards Visa Best for earning. Competitive rate if you carry a balance: "
+            "12.50%–19.50% APR. Variable rate from 12.50% APR to 19.50% APR."
+        ),
+        url="https://www.example.com/personal/credit-cards",
+        snapshot_id="s1",
+        taken_on="2026-01-01",
+        authority=1.0,
+        stale_for_rates=False,
+    )
+    pack = EvidencePack(facts=[], chunks=[ChunkEvidence(chunk, 1.0)], as_of=None)
+    ans = Answer(text="Rewards Visa APR is 12.50% to 19.50%.", sources=[], confident=True)
+    out = apply_grounding(ans, pack, "What is the Rewards Visa APR range?")
+    assert out.confident
+
+
+def test_confident_answer_not_sanitized():
+    ans = Answer(text="The rate is 5.39% APR.", sources=[], confident=True)
+    out = sanitize_refusal(ans)
+    assert out.confident and "5.39" in out.text
