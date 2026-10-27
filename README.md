@@ -55,7 +55,7 @@ Entry: `solution.py` (`build()` → `KnowledgeSystem`).
 
 ## Eval results (with-key, this branch)
 
-Two public runs on the strict scorer: **~0.78** (0.779 and 0.781). Dev set: **~0.83** (0.831). Latency **p95 ~3.4–3.9 s** on public eval; **max observed ~12 s** on a single item. No-key rules-only on the agent VM: public **~0.38**, dev set **~0.42**.
+Two public runs on the strict scorer: **~0.78** (0.779 and 0.781). Dev set: **~0.82** (0.816–0.831). Latency **p95 ~3.4–3.9 s** on public eval; **max observed ~12 s** on a single item. No-key rules-only on the agent VM: public **~0.38**, dev set **~0.42**.
 
 ## Known limitations
 

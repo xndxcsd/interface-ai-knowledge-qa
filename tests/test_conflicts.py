@@ -72,38 +72,68 @@ def test_prose_apr_range_conflict():
 
 
 def test_prose_apr_range_conflict_on_real_credit_card_snapshots():
+    import json
     from pathlib import Path
+
+    import pytest
 
     from kb.prose_rates import extract_prose_apr_facts
 
-    base = Path("/tmp/dupaco-snapshots/extracted")
-    page = base / "01_2026-05-12_baseline" / "pages" / "personal-credit-cards-8b78fb.md"
-    latest = base / "05_2026-09-28_latest" / "pages" / "personal-credit-cards-8b78fb.md"
-    if not page.is_file() or not latest.is_file():
-        import pytest
+    cards_url = "https://www.dupaco.com/personal/credit-cards"
+    snap_root = Path(__file__).resolve().parents[1] / "snapshots"
+    snap_dirs = (
+        sorted(
+            (d for d in snap_root.iterdir() if d.is_dir() and (d / "manifest.json").is_file()),
+            key=lambda d: json.loads((d / "manifest.json").read_text(encoding="utf-8"))["taken_on"],
+        )
+        if snap_root.is_dir()
+        else []
+    )
+    if len(snap_dirs) < 2:
+        pytest.skip(
+            "Unpack snapshots_zip/ at the repo root (or run the harness once) so ./snapshots/ has kit crawl folders."
+        )
 
-        pytest.skip("dupaco snapshot tree not on this machine")
+    def _cards_page(snap_dir: Path) -> Path | None:
+        manifest = json.loads((snap_dir / "manifest.json").read_text(encoding="utf-8"))
+        for page in manifest.get("pages", []):
+            if str(page.get("url", "")).rstrip("/") == cards_url:
+                rel = page.get("file")
+                if rel:
+                    return snap_dir / rel
+        return None
 
-    url = "https://www.dupaco.com/personal/credit-cards"
+    oldest, latest = snap_dirs[0], snap_dirs[-1]
+    page_old, page_new = _cards_page(oldest), _cards_page(latest)
+    if not page_old or not page_new or not page_old.is_file() or not page_new.is_file():
+        pytest.skip(
+            "Unpack snapshots_zip/ at the repo root (or run the harness once) so ./snapshots/ has kit crawl folders."
+        )
+
     facts = []
-    for snap_dir, taken in (
-        ("01_2026-05-12_baseline", "2026-05-12"),
-        ("05_2026-09-28_latest", "2026-09-28"),
-    ):
-        md = (base / snap_dir / "pages" / "personal-credit-cards-8b78fb.md").read_text()
+    latest_taken = ""
+    for snap_dir, page_path in ((oldest, page_old), (latest, page_new)):
+        manifest = json.loads((snap_dir / "manifest.json").read_text(encoding="utf-8"))
+        taken = manifest["taken_on"]
+        if snap_dir == latest:
+            latest_taken = taken
         facts.extend(
             extract_prose_apr_facts(
-                md, url=url, snapshot_id=snap_dir, taken_on=taken, authority=1.0
+                page_path.read_text(encoding="utf-8"),
+                url=cards_url,
+                snapshot_id=manifest["snapshot_id"],
+                taken_on=taken,
+                authority=1.0,
             )
         )
     platinum = [f for f in facts if f.subject.lower() == "platinum visa"]
     assert any("13.00" in f.value and "20.00" in f.value for f in platinum)
     assert any("12.50" in f.value and "19.50" in f.value for f in platinum)
-    current = [f for f in facts if f.taken_on == "2026-09-28"]
+    current = [f for f in facts if f.taken_on == latest_taken]
     conflicts = detect_conflicts(
         facts,
         current_facts=current,
-        latest_snapshot_date="2026-09-28",
+        latest_snapshot_date=latest_taken,
     )
     assert any(
         "platinum" in c["topic"].lower() and "12.50" in c["resolution"] for c in conflicts
