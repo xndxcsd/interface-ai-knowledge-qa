@@ -4,7 +4,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from kb.authority import newest_effective_date
 from kb.markdown_ctx import nearest_heading
 from kb.normalize import normalize_value
 
@@ -16,7 +15,6 @@ class ExtractedFact:
     value: str
     raw_row: str
     section: str
-    effective_date: str | None
     url: str
     snapshot_id: str
     taken_on: str
@@ -40,7 +38,6 @@ def extract_table_facts(
     authority: float,
 ) -> list[ExtractedFact]:
     md = markdown or ""
-    effective = newest_effective_date(md)
     facts: list[ExtractedFact] = []
     lines = md.splitlines()
     i = 0
@@ -91,7 +88,6 @@ def extract_table_facts(
                             value=val,
                             raw_row=raw,
                             section=sec,
-                            effective_date=effective,
                             url=url,
                             snapshot_id=snapshot_id,
                             taken_on=taken_on,

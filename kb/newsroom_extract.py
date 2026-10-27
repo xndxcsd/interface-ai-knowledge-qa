@@ -49,7 +49,6 @@ def extract_newsroom_facts(
                 value=value,
                 raw_row=raw[:200],
                 section=f"article-places:{','.join(tags)}" if tags else "article",
-                effective_date=None,
                 url=url,
                 snapshot_id=snapshot_id,
                 taken_on=taken_on,

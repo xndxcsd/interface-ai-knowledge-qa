@@ -14,7 +14,7 @@ ALLOW = frozenset(
         "%", "apy", "apr", "dupaco", "rate", "rates", "business", "personal",
         "rewards", "savings-account", "credit-cards", "checking-accounts",
         "personal/savings-account", "personal/credit-cards", "personal/checking-accounts",
-        "join.dupaco.com", "credit", "union", "visa", "checking", "savings", "home",
+        "credit", "union", "visa", "checking", "savings", "home",
         "market", "money", "boat", "branch", "hours", "lobby", "drive", "street",
         "avenue", "mon", "fri", "thu", "tue", "wed", "model", "year",
     }

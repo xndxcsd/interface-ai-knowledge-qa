@@ -24,25 +24,19 @@ _CANDIDATE_PLANTS = (
     "volunteer",
     "11375",
     "8:30",
-    "lobby opens 8:30",
+    "join.dupaco.com",
 )
 
 
-def _resolve_plant(plant: str, banned: set[str]) -> str | None:
-    if plant in banned:
-        return plant
-    for tok in banned:
-        if plant in tok or tok in plant:
-            return plant if plant in tok else tok
-    return None
+def _resolve_plant(plant: str, banned: set[str]) -> str:
+    assert plant in banned, f"{plant!r} not covered by eval banned set on this kit"
+    return plant
 
 
 @pytest.mark.parametrize("plant", _CANDIDATE_PLANTS)
 def test_planted_token_fails_scanner(plant: str):
     banned = _banned_tokens()
     resolved = _resolve_plant(plant, banned)
-    if resolved is None:
-        pytest.skip(f"{plant!r} not covered by eval banned set on this kit")
     groups = _split_groups(banned)
     ngrams = _question_ngrams()
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
@@ -56,9 +50,8 @@ def test_planted_split_oldenburg_fails_scanner():
     banned = _banned_tokens()
     groups = _split_groups(banned)
     ngrams = _question_ngrams()
-    split = ("olden", "burg")
-    if not any(tuple(sorted(g)) == split for g in groups):
-        pytest.skip("olden/burg split group not derived from eval")
+    split = frozenset({"olden", "burg"})
+    assert any(frozenset(g) == split for g in groups), "olden/burg split group not derived from eval"
     src = 'if "olden" in q and "burg" in q:\n    pass\n'
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(src)

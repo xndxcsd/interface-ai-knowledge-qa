@@ -66,7 +66,6 @@ def extract_hours_facts(
                 value=val,
                 raw_row=raw[:200],
                 section=sec,
-                effective_date=None,
                 url=url,
                 snapshot_id=snapshot_id,
                 taken_on=taken_on,

@@ -44,7 +44,6 @@ def extract_contact_facts(
                 value=value,
                 raw_row=raw[:200],
                 section=section,
-                effective_date=None,
                 url=url,
                 snapshot_id=snapshot_id,
                 taken_on=taken_on,

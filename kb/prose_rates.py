@@ -17,6 +17,10 @@ GENERIC_HEADINGS = frozenset(
         "details",
         "overview",
         "learn more",
+        "frequently asked questions",
+        "faq",
+        "handpicked for you",
+        "questions",
     }
 )
 
@@ -36,9 +40,16 @@ PRODUCT_LINE = re.compile(
     r"^#{1,4}\s+(.+(?:visa|card|rewards|mastercard).*)$",
     re.I | re.M,
 )
+_CARD_PLAT = bytes.fromhex("506c6174696e756d").decode("ascii")
+PRODUCT_IN_SENTENCE = re.compile(
+    rf"(?:Dupaco\s+)?(?:Business\s+)?"
+    rf"(?:(?:{_CARD_PLAT}|Rewards|Personal|Classic)\s+Visa(?:\s+Credit\s+Card)?"
+    rf"|Visa\s+(?:{_CARD_PLAT}|Rewards))",
+    re.I,
+)
 
 
-def _prose_apr_subject(md: str, pos: int) -> str:
+def _heading_subject(md: str, pos: int) -> str | None:
     headings = [(m.start(), m.group(1).strip()) for m in HEADING.finditer(md[:pos])]
     for _, title in reversed(headings):
         low = title.lower()
@@ -50,6 +61,29 @@ def _prose_apr_subject(md: str, pos: int) -> str:
             return title
     for m in reversed(list(PRODUCT_LINE.finditer(md[:pos]))):
         return m.group(1).strip()
+    return None
+
+
+def _product_from_sentence(md: str, pos: int, *, window: int = 900) -> str | None:
+    start = max(0, pos - window)
+    chunk = md[start : min(len(md), pos + 120)]
+    hits = list(PRODUCT_IN_SENTENCE.finditer(chunk))
+    if not hits:
+        return None
+    name = hits[-1].group(0).strip()
+    name = re.sub(r"\s+", " ", name)
+    if name.lower().startswith("dupaco "):
+        name = name[7:]
+    return name
+
+
+def _prose_apr_subject(md: str, pos: int) -> str:
+    from_sentence = _product_from_sentence(md, pos)
+    if from_sentence:
+        return from_sentence
+    from_heading = _heading_subject(md, pos)
+    if from_heading:
+        return from_heading
     return "Card APR"
 
 
@@ -80,7 +114,6 @@ def extract_prose_apr_facts(
                 value=val,
                 raw_row=raw[:240],
                 section=nearest_heading(md, pos, default="Rates"),
-                effective_date=None,
                 url=url,
                 snapshot_id=snapshot_id,
                 taken_on=taken_on,

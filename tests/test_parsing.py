@@ -32,4 +32,3 @@ def test_extract_table_facts():
         authority=1.0,
     )
     assert any("0.15%" in f.value for f in facts)
-    assert facts[0].effective_date == "2026-06-15"

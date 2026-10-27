@@ -28,14 +28,18 @@ def _minimal_store():
 
 def test_construction_loan_refusal():
     store = _minimal_store()
-    ans = answer_question(store, "What interest rate do you charge on a construction loan?", None)
+    ans = answer_question(
+        store, "For a custom home build, what APR does Dupaco publish on construction financing?", None
+    )
     assert not ans.confident
     assert "don't know" in ans.text.lower() or "does not publish" in ans.text.lower()
 
 
-def test_mullan_hours_refusal():
+def test_unknown_branch_hours_refusal():
     store = _minimal_store()
     ans = answer_question(
-        store, "Can you give me the lobby hours for the Oakridge Avenue branch?", None
+        store,
+        "What are the lobby hours for the branch at 900 Example Parkway in Sampletown?",
+        None,
     )
     assert not ans.confident
