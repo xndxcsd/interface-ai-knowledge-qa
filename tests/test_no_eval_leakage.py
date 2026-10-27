@@ -28,9 +28,31 @@ ALLOW = frozenset(
         "credit-cards",
         "checking-accounts",
         "personal",
-        "business",
     }
 )
+COMMON_TITLE = frozenset(
+    {
+        "what", "how", "when", "where", "who", "why", "which", "does", "can", "could",
+        "would", "should", "is", "are", "was", "were", "do", "did", "has", "have",
+        "the", "and", "for", "with", "from", "into", "your", "you", "our", "their",
+        "free", "annual", "month", "months", "year", "model", "new", "current",
+        "member", "members", "service", "phone", "number", "listed", "apply",
+        "applies", "offer", "offers", "program", "account", "accounts", "checking",
+        "savings", "credit", "loan", "loans", "rate", "rates", "dupaco", "visa",
+        "mastercard", "mobile", "online", "banking", "branch", "branches", "lobby",
+        "drive", "up", "window", "hours", "open", "close", "address", "street",
+        "iowa", "illinois", "wisconsin", "indiana", "minnesota", "missouri",
+        "certificate", "fixed", "special", "jumbo", "share", "money", "market",
+        "home", "boat", "auto", "vehicle", "mortgage", "refinance", "student",
+        "personal", "business", "give", "read", "provide", "include", "answer",
+        "quote", "name", "main", "avenue", "lane", "about", "people", "after",
+    }
+)
+SPLIT_STOP = frozenset(
+    COMMON_TITLE | ALLOW | {"up", "lab", "mon", "fri", "thu", "tue", "wed", "or", "less"}
+)
+
+
 def token_in_banned(needle: str, banned: set[str]) -> bool:
     n = re.sub(r"\s+", " ", needle.lower().strip())
     for word in re.findall(r"[a-z0-9'.-]+", n):
@@ -81,6 +103,20 @@ def _comments_in_python(path: Path) -> str:
     except py_tokenize.TokenError:
         pass
     return "\n".join(out).lower()
+
+
+def _distinctive_proper_nouns(raw: str) -> set[str]:
+    s = str(raw).strip()
+    out: set[str] = set()
+    for m in re.finditer(r"(?<=[a-z]\s)[A-Z][a-z]{4,}[A-Za-z'\-]*\b", s):
+        w = m.group(0).lower().rstrip("'s")
+        if w not in COMMON_TITLE and w not in ALLOW:
+            out.add(w)
+    for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
+        w = m.group(0).lower()
+        if w not in ALLOW:
+            out.add(w)
+    return out
 
 
 def _tokens_from_must_token(raw: str) -> set[str]:
@@ -134,6 +170,7 @@ def _tokens_from_question(raw: str) -> set[str]:
         out.add(re.sub(r"\s+", " ", m.group(0).lower()))
     for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
         out.add(m.group(0).lower())
+    out |= _distinctive_proper_nouns(s)
     return {t for t in out if t and t not in ALLOW}
 
 
@@ -159,22 +196,47 @@ def _banned_from_eval() -> set[str]:
     return out
 
 
+def _split_token_groups(banned: set[str]) -> list[tuple[str, ...]]:
+    groups: list[tuple[str, ...]] = []
+    for tok in banned:
+        if "-" not in tok:
+            continue
+        parts = [p for p in tok.split("-") if len(p) >= 2]
+        if len(parts) < 2 or any(p in SPLIT_STOP for p in parts):
+            continue
+        groups.append(tuple(parts))
+    return groups
+
+
+def _whole_words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9'.-]+", text.lower()))
+
+
 def test_no_eval_literals_in_kb_source():
     banned = _banned_from_eval()
+    split_groups = _split_token_groups(banned)
     violations: list[str] = []
     for path in SCAN:
         lits = _literals_in_python(path)
         comments = _comments_in_python(path)
         combined = lits + "\n" + comments
+        words = _whole_words(combined)
         whole = path.read_text(encoding="utf-8").lower()
         for tok in banned:
             if len(tok) >= 9 and tok.isdigit():
                 if tok in whole:
                     violations.append(f"{path.name}: {tok!r}")
-            elif len(tok) >= 4 and tok in combined:
+            elif len(tok) >= 4 and re.search(
+                rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", combined
+            ):
                 violations.append(f"{path.name}: {tok!r}")
             elif "dupaco.com" in tok and tok in combined:
                 violations.append(f"{path.name}: {tok!r}")
+        for parts in split_groups:
+            if all(p in words for p in parts):
+                violations.append(
+                    f"{path.name}: split tokens {parts!r} (evasion of compound eval phrase)"
+                )
     assert not violations, "Eval leakage in string literals:\n" + "\n".join(
         sorted(set(violations))
     )

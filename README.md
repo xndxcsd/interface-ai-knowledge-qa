@@ -11,7 +11,7 @@ Requires **Python 3.11+** (3.11+ works; tested on 3.11 and 3.13).
 ```bash
 git clone https://github.com/xndxcsd/interface-ai-knowledge-qa.git
 cd interface-ai-knowledge-qa
-python3.11 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest

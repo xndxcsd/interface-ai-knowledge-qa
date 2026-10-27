@@ -180,30 +180,11 @@ def gather_evidence(
         for page in hint_pages:
             _inject_page_chunks(page, chunk_hits)
 
-    ql = question.lower()
-    if any(k in ql for k in ("forbes", "volunteer", "branch offices", "physical branch")) or (
-        "hy" in ql and "vee" in ql
-    ):
-        corpus = store.corpus_as_of(as_of, for_rates=False)
-        news = sorted(
-            [p for p in corpus if "/newsroom/" in p.canonical.lower()],
-            key=lambda p: p.taken_on,
-            reverse=True,
-        )
-        for page in news[:5]:
-            _inject_page_chunks(page, chunk_hits, extra=True)
-
-    if is_hours_question(question):
-        for f in store.facts_as_of_ranked(as_of):
-            if f.field.lower() == "hours":
-                s = score_fact(f, q_tokens, question, rate_question=rate_q) + 1.2
-                scored_facts.append(FactEvidence(f, s))
-
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
         weight = ch.authority * (0.15 if (rate_q and ch.stale_for_rates) else 1.0)
         chunks.append(ChunkEvidence(ch, bm25_score * weight))
-    chunks.sort(key=lambda x: x.score, reverse=True)
+    chunks.sort(key=lambda c: (c.score, c.chunk.taken_on), reverse=True)
     return EvidencePack(facts=scored_facts, chunks=chunks[:max_chunks], as_of=as_of)
 
 

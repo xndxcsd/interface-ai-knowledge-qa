@@ -4,9 +4,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "harness"))
 from contract import Answer  # noqa: E402
 
-from kb.evidence import EvidencePack, FactEvidence
+from kb.evidence import EvidencePack, ChunkEvidence, FactEvidence
 from kb.facts import ExtractedFact
 from kb.grounding import apply_grounding, sanitize_refusal
+from kb.system import ChunkRecord
 
 
 def test_rejects_ungrounded_rate():
@@ -67,3 +68,74 @@ def test_sanitize_refusal_strips_numbers():
     out = sanitize_refusal(ans)
     assert out.text == "I don't know."
     assert not out.confident
+
+
+def test_sanitize_refusal_keeps_sources():
+    src = [{"url": "https://www.example.com/page", "snapshot_id": "s1"}]
+    ans = Answer(text="Maybe 12%.", sources=src, confident=False)
+    out = sanitize_refusal(ans)
+    assert out.text == "I don't know."
+    assert out.sources == src
+
+
+def test_allows_prose_visa_rate_on_same_page():
+    chunk = ChunkRecord(
+        chunk_id=1,
+        text=(
+            "Personal Visa credit card variable APR ranges from 12.50% to 19.50% "
+            "based on creditworthiness."
+        ),
+        url="https://www.example.com/personal/credit-cards",
+        snapshot_id="s1",
+        taken_on="2026-01-01",
+        authority=1.0,
+        stale_for_rates=False,
+    )
+    pack = EvidencePack(
+        facts=[],
+        chunks=[ChunkEvidence(chunk, 1.0)],
+        as_of=None,
+    )
+    ans = Answer(
+        text="Personal Visa APR ranges from 12.50% to 19.50%.",
+        sources=[],
+        confident=True,
+    )
+    out = apply_grounding(ans, pack, "What is the personal Visa APR range?")
+    assert out.confident
+
+
+def test_refuses_unknown_branch_hours():
+    pack = EvidencePack(
+        facts=[
+            FactEvidence(
+                ExtractedFact(
+                    subject="Galena Branch",
+                    field="hours",
+                    value="Lobby 9 a.m.–5 p.m.",
+                    raw_row="",
+                    section="",
+                    effective_date=None,
+                    url="https://www.example.com/contact",
+                    snapshot_id="s1",
+                    taken_on="2026-01-01",
+                    authority=1.0,
+                ),
+                1.0,
+            )
+        ],
+        chunks=[],
+        as_of=None,
+    )
+    ans = Answer(
+        text="Lobby hours are 8 a.m.–6 p.m.",
+        sources=[],
+        confident=True,
+    )
+    out = apply_grounding(
+        ans,
+        pack,
+        "What are the lobby hours at the Mullan branch?",
+    )
+    assert not out.confident
+    assert out.text == "I don't know."

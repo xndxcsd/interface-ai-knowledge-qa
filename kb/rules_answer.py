@@ -18,7 +18,7 @@ def _ans(text, sources, confident=True, conflict_note=None):
     return Answer(text=text, sources=sources, confident=confident, conflict_note=conflict_note)
 
 
-IDK = "I don't know — I couldn't find that on Dupaco's website based on the available pages."
+IDK = "I don't know — I couldn't find that on the website based on the available pages."
 
 
 def _wants_list(question: str) -> bool:
@@ -71,7 +71,7 @@ def rules_answer(question: str, pack: EvidencePack) -> "Answer":
                 lines.append(line)
             sources.append(_src(f.url, f.snapshot_id, f.raw_row[:140]))
         if lines:
-            text = "From Dupaco's current rate information: " + "; ".join(lines[:12])
+            text = "From current rate information: " + "; ".join(lines[:12])
             return _ans(text, sources[:3])
 
     parts: list[str] = []
@@ -80,7 +80,7 @@ def rules_answer(question: str, pack: EvidencePack) -> "Answer":
         parts.append(f"{f.subject}: {f.value} ({f.field})")
         sources.append(_src(f.url, f.snapshot_id, f.raw_row[:160]))
     if parts:
-        lead = "Per Dupaco's website, " + "; ".join(parts) + "."
+        lead = "Per the website, " + "; ".join(parts) + "."
         return _ans(lead, sources[:3])
 
     ch = pack.chunks[0].chunk
