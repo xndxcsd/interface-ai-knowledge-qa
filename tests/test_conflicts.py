@@ -24,11 +24,11 @@ def test_detect_rate_conflict():
             section="Certs",
             effective_date="2026-09-01",
             url="https://www.dupaco.com/personal/savings-account",
-            snapshot_id="b",
+            snapshot_id="a",
             taken_on="2026-09-28",
             authority=1.0,
         ),
     ]
-    conflicts = detect_conflicts(facts)
+    conflicts = detect_conflicts(facts, latest_snapshot_date="2026-09-28")
     assert conflicts
     assert "3.50%" in conflicts[0]["resolution"]

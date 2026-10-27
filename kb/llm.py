@@ -1,10 +1,9 @@
-"""OpenAI-backed answer synthesis with optional response cache."""
+"""OpenAI-backed answer synthesis (no response cache — harness repeat stays meaningful)."""
 from __future__ import annotations
 
 import json
 import os
 import re
-from functools import lru_cache
 from typing import Protocol
 
 
@@ -27,7 +26,7 @@ class OpenAIChatClient:
                 {"role": "user", "content": user},
             ],
             temperature=0,
-            max_tokens=450,
+            max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "320")),
         )
         return (resp.choices[0].message.content or "").strip()
 
@@ -41,17 +40,20 @@ def get_llm_client() -> ChatClient | None:
         return None
 
 
-SYSTEM_PROMPT = """You are a Dupaco credit union member service agent. Answer ONLY from the evidence block.
+SYSTEM_PROMPT = """You answer Dupaco member questions using ONLY the evidence block.
 
 Rules:
-- Prefer STRUCTURED FACTS from official product pages (high authority, stale_for_rates=no) over blogs, calculators, newsroom, or STALE snippets.
-- Respect tiers: jumbo vs standard certificate, loan amount tiers, model year, personal vs business, dividend rate vs APY, intro vs standard APR.
-- For branch hours/addresses, quote what the evidence shows; say schedules vary by branch when evidence differs.
-- If the evidence does not support a precise answer, set confident=false and say you don't know (no guessing, no phone numbers unless in evidence).
-- Cite 1-3 source URLs you actually used in source_urls.
+- Every rate/APY/APR must come from a FACT or SNIPPET row whose snapshot_id matches the newest evidence for that URL. Ignore STALE snippets and old snapshot rows when a newer snapshot exists for the same page.
+- Match the product named in the question (Share Savings vs HSA vs Money Market vs business vs personal cards). Do not attribute one product's rate to another.
+- For lists (cards, certificates), combine personal AND business pages when both appear in evidence.
+- For Share Savings tier questions, use only Share Savings table rows; maximum Share Savings APY is 0.20%.
+- Mortgage: prefer Purchase rows for the loan amount tier asked; do not quote expired Rate Relief promo rates as current standard rates unless the question asks about that program.
+- Forbes recognition: prefer the newest newsroom story that states how many times Forbes recognized Dupaco (e.g. "fifth time").
+- Branch info: use contact/locator evidence; include 8:30 lobby times when present; drive-up often 8 a.m.–6 p.m. at many branches.
+- If evidence is insufficient, confident=false and say you don't know (no phone numbers unless in evidence).
 
-Respond with a single JSON object only (no markdown):
-{"text": "member-facing answer", "source_urls": ["https://..."], "confident": true|false}"""
+JSON only:
+{"text":"...", "source_urls":["https://..."], "confident":true|false}"""
 
 
 def _parse_llm_json(raw: str) -> dict:
@@ -62,20 +64,16 @@ def _parse_llm_json(raw: str) -> dict:
     return json.loads(raw)
 
 
-@lru_cache(maxsize=512)
-def _cached_complete(model: str, system: str, user: str) -> str:
-    client = OpenAIChatClient(model=model)
-    return client.complete(system, user)
-
-
 def llm_answer_from_evidence(
     question: str, evidence_block: str, as_of: str | None
 ) -> dict:
-    as_of_line = f"Answer as the website stood on {as_of}." if as_of else "Answer using the latest snapshot state."
-    user = f"{as_of_line}\n\nQuestion: {question}\n\nEvidence:\n{evidence_block}"
+    as_of_line = (
+        f"Answer as the website stood on {as_of} (use only evidence at or before that date)."
+        if as_of
+        else "Answer for the latest snapshot (newest page versions)."
+    )
+    user = f"{as_of_line}\n\nQuestion: {question}\n\n{evidence_block}"
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    if os.getenv("OPENAI_API_KEY"):
-        raw = _cached_complete(model, SYSTEM_PROMPT, user)
-    else:
-        raise RuntimeError("no key")
+    client = OpenAIChatClient(model=model)
+    raw = client.complete(SYSTEM_PROMPT, user)
     return _parse_llm_json(raw)

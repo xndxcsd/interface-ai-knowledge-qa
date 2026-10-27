@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from kb.authority import newest_effective_date
+from kb.normalize import normalize_value
 from kb.textutil import clean_markdown
 
 
@@ -77,7 +78,7 @@ def extract_table_facts(
                 for j, h in enumerate(header[1:], start=1):
                     if j >= len(row_cells):
                         break
-                    val = row_cells[j]
+                    val = normalize_value(row_cells[j])
                     if not val or val in ("—", "-"):
                         continue
                     if "%" not in val and not re.search(r"\d", val):

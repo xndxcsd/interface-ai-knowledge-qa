@@ -1,4 +1,4 @@
-"""General question answering via evidence retrieval + LLM (or rules fallback)."""
+"""Question answering via evidence retrieval + LLM (or rules fallback)."""
 from __future__ import annotations
 
 from kb.evidence import format_evidence_for_prompt, gather_evidence
@@ -7,25 +7,27 @@ from kb.postcheck import postcheck_answer
 from kb.rules_answer import rules_answer
 
 
+def _snapshot_for_url(pack, url: str) -> tuple[str | None, str | None]:
+    u = url.rstrip("/")
+    for fe in pack.facts:
+        if fe.fact.url.rstrip("/") == u:
+            return fe.fact.snapshot_id, fe.fact.raw_row[:120]
+    for ce in pack.chunks:
+        if ce.chunk.url.rstrip("/") == u:
+            return ce.chunk.snapshot_id, ce.chunk.text[:120]
+    return None, None
+
+
 def _sources_from_urls(pack, urls: list[str]):
     from contract import Source
 
-    url_set = {u.rstrip("/") for u in urls if u}
     out = []
-    for u in url_set:
-        sid = None
-        quote = None
-        for fe in pack.facts:
-            if fe.fact.url.rstrip("/") == u.rstrip("/"):
-                sid = fe.fact.snapshot_id
-                quote = fe.fact.raw_row[:120]
-                break
-        if sid is None:
-            for ce in pack.chunks:
-                if ce.chunk.url.rstrip("/") == u.rstrip("/"):
-                    sid = ce.chunk.snapshot_id
-                    quote = ce.chunk.text[:120]
-                    break
+    seen = set()
+    for u in urls or []:
+        if not u or u in seen:
+            continue
+        seen.add(u)
+        sid, quote = _snapshot_for_url(pack, u)
         out.append(Source(url=u, snapshot_id=sid, quote=quote))
     return out[:4]
 

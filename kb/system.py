@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 
 from kb.authority import authority_score, is_likely_stale_for_rates, normalize_url
 from kb.conflicts import detect_conflicts
+from kb.contact_extract import extract_contact_facts
 from kb.facts import ExtractedFact, extract_table_facts
+from kb.normalize import fact_key
 from kb.retrieve import BM25Index
 from kb.textutil import clean_markdown, split_chunks, tokenize
 
@@ -76,13 +78,40 @@ class KnowledgeStore:
                     authority=auth,
                 )
             )
+            if "/contact" in normalize_url(p.url) or auth >= 0.9 and "contact" in p.url.lower():
+                self.facts.extend(
+                    extract_contact_facts(
+                        p.markdown,
+                        url=p.url,
+                        snapshot_id=sid,
+                        taken_on=taken,
+                        authority=auth,
+                    )
+                )
 
     def finalize(self) -> None:
         if self._finalized:
             return
         self._build_latest_index()
-        self._conflicts_raw = detect_conflicts(self._facts_as_of(None))
+        self._conflicts_raw = detect_conflicts(
+            self.facts_for_conflicts(None),
+            latest_snapshot_date=self.latest_taken_on(),
+        )
         self._finalized = True
+
+    def latest_taken_on(self) -> str:
+        if not self.snapshots:
+            return ""
+        return max(t for _, t in self.snapshots)
+
+    def _current_pages(self, as_of: str | None) -> dict[str, PageVersion]:
+        cutoff = self._cutoff(as_of)
+        by_url: dict[str, PageVersion] = {}
+        for pv in sorted(self.pages, key=lambda x: x.taken_on):
+            if cutoff and pv.taken_on > cutoff:
+                continue
+            by_url[pv.canonical] = pv
+        return by_url
 
     def _build_latest_index(self) -> None:
         corpus = self.corpus_as_of(None, for_rates=False)
@@ -115,14 +144,9 @@ class KnowledgeStore:
         return as_of[:10]
 
     def corpus_as_of(self, as_of: str | None, *, for_rates: bool) -> list[PageVersion]:
-        cutoff = self._cutoff(as_of)
-        by_url: dict[str, PageVersion] = {}
-        for pv in sorted(self.pages, key=lambda x: x.taken_on):
-            if cutoff and pv.taken_on > cutoff:
-                continue
-            if for_rates and pv.stale_for_rates:
-                continue
-            by_url[pv.canonical] = pv
+        by_url = self._current_pages(as_of)
+        if for_rates:
+            return [p for p in by_url.values() if not p.stale_for_rates]
         return list(by_url.values())
 
     def get_page(
@@ -187,15 +211,30 @@ class KnowledgeStore:
     def search(self, query: str, as_of: str | None, top_k: int = 6) -> list[ChunkRecord]:
         return [c for c, _ in self.search_as_of(query, as_of, top_k=top_k)]
 
-    def _facts_as_of(self, as_of: str | None) -> list[ExtractedFact]:
-        cutoff = self._cutoff(as_of)
-        by_key: dict[tuple[str, str, str, str], ExtractedFact] = {}
-        for f in sorted(self.facts, key=lambda x: x.taken_on):
-            if cutoff and f.taken_on > cutoff:
+    def facts_for_conflicts(self, as_of: str | None) -> list[ExtractedFact]:
+        current = self._current_pages(as_of)
+        out: list[ExtractedFact] = []
+        for f in self.facts:
+            if f.authority < 0.9:
                 continue
+            canon = normalize_url(f.url)
+            page = current.get(canon)
+            if page is None or f.snapshot_id != page.snapshot_id:
+                continue
+            out.append(f)
+        return out
+
+    def _facts_as_of(self, as_of: str | None) -> list[ExtractedFact]:
+        current = self._current_pages(as_of)
+        by_key: dict[tuple[str, str, str], ExtractedFact] = {}
+        for f in self.facts:
             if f.authority < 0.5:
                 continue
-            key = (f.url, f.subject, f.field, f.value)
+            canon = normalize_url(f.url)
+            page = current.get(canon)
+            if page is None or f.snapshot_id != page.snapshot_id:
+                continue
+            key = fact_key(f.url, f.subject, f.field)
             by_key[key] = f
         return list(by_key.values())
 
