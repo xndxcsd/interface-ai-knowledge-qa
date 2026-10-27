@@ -124,7 +124,7 @@ def test_rate_grounded_through_answer(stub_llm):
     )
     sys = DupacoKnowledge()
     sys._store = _store_with_facts(rate)
-    out = sys.answer("What is the Rewards Visa APR range?", None)
+    out = sys.answer("What is the Example Rewards card APR range?", None)
     assert out.confident
     assert "12.50" in out.text
 

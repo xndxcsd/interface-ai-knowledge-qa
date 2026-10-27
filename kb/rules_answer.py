@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from kb.evidence import EvidencePack
-from kb.retrieval_hints import is_rate_question
-from kb.retrieval_hints import is_list_question
+from kb.retrieval_hints import is_list_question, is_rate_question
 from kb.textutil import has_word
+
+if TYPE_CHECKING:
+    from contract import Answer
 
 
 def _src(url, snapshot_id, quote=None):
@@ -24,11 +27,7 @@ def _ans(text, sources, confident=True, conflict_note=None):
 IDK = "I don't know — I couldn't find that on the website based on the available pages."
 
 
-def _wants_list(question: str) -> bool:
-    return is_list_question(question)
-
-
-def rules_answer(question: str, pack: EvidencePack) -> "Answer":
+def rules_answer(question: str, pack: EvidencePack) -> Answer:
     rate_q = is_rate_question(question)
     if not pack.facts and not pack.chunks:
         return _ans(IDK, [], confident=False)
@@ -49,7 +48,7 @@ def rules_answer(question: str, pack: EvidencePack) -> "Answer":
             return _ans(IDK, [], confident=False)
 
     sources = []
-    if _wants_list(question) or (rate_q and has_word(question, "certificate")):
+    if is_list_question(question) or (rate_q and has_word(question, "certificate")):
         lines = []
         for fe in auth_facts[:14]:
             f = fe.fact

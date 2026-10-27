@@ -44,5 +44,5 @@ def test_gather_includes_prose_apr_facts():
             md, url=url, snapshot_id="s1", taken_on="2026-01-01", authority=1.0
         )
     )
-    pack = gather_evidence(store, "What is the Rewards Visa APR range?", None, max_facts=10)
+    pack = gather_evidence(store, "What is the Example Rewards card APR range?", None, max_facts=10)
     assert any("apr range" in fe.fact.field.lower() for fe in pack.facts)

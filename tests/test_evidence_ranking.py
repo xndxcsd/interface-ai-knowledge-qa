@@ -31,10 +31,10 @@ def test_rate_question_prefers_product_page_facts_over_newsroom_hours():
         authority=0.55,
     )
     rate_row = ExtractedFact(
-        subject="Free Checking",
+        subject="Basic Checking",
         field="Dividend Rate",
         value="0.05%",
-        raw_row="| Free Checking | 0.05% |",
+        raw_row="| Basic Checking | 0.05% |",
         section="Rates",
         effective_date=None,
         url="https://www.example.com/personal/checking-accounts",
@@ -50,7 +50,7 @@ def test_rate_question_prefers_product_page_facts_over_newsroom_hours():
             url=rate_row.url,
             canonical=canon,
             title="Checking",
-            markdown="| Free Checking | Dividend Rate | 0.05% |\n|---|---|\n| Free Checking | 0.05% |",
+            markdown="| Basic Checking | Dividend Rate | 0.05% |\n|---|---|\n| Basic Checking | 0.05% |",
             snapshot_id="s1",
             taken_on="2026-01-01",
             fetched_at="2026-01-01",
@@ -60,7 +60,7 @@ def test_rate_question_prefers_product_page_facts_over_newsroom_hours():
     )
     pack = gather_evidence(
         store,
-        "What is the dividend rate on Free Checking?",
+        "What is the dividend rate on Basic Checking?",
         None,
         max_facts=8,
     )

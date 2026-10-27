@@ -36,6 +36,6 @@ def test_construction_loan_refusal():
 def test_mullan_hours_refusal():
     store = _minimal_store()
     ans = answer_question(
-        store, "Can you give me the lobby hours for the Mullan Avenue branch?", None
+        store, "Can you give me the lobby hours for the Oakridge Avenue branch?", None
     )
     assert not ans.confident

@@ -50,7 +50,7 @@ def test_as_of_picks_older_snapshot_page():
     )
     ans = answer_question(
         store,
-        "What was the rate on the 10-month fixed jumbo special certificate as of May 2026?",
+        "What was the rate on the 10-month fixed premium certificate as of May 2026?",
         "2026-05-31",
     )
     assert "3.90" in ans.text

@@ -58,7 +58,7 @@ def test_rejects_wrong_column_for_apy_question():
     out = apply_grounding(
         ans,
         pack,
-        "What APY did the 10-month jumbo certificate special pay as of May 2026?",
+        "What APY did the 10-month premium certificate special pay as of May 2026?",
     )
     assert not out.confident
 
@@ -187,7 +187,7 @@ def test_rewards_visa_prose_range():
     )
     pack = EvidencePack(facts=[], chunks=[ChunkEvidence(chunk, 1.0)], as_of=None)
     ans = Answer(text="Rewards Visa APR is 12.50% to 19.50%.", sources=[], confident=True)
-    out = apply_grounding(ans, pack, "What is the Rewards Visa APR range?")
+    out = apply_grounding(ans, pack, "What is the Example Rewards card APR range?")
     assert out.confident
 
 

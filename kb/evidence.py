@@ -148,6 +148,7 @@ def _score_facts(
     branch_places: list[str],
     max_facts: int,
 ) -> list[FactEvidence]:
+    """Rank structured facts for the question (BM25-independent scoring pass)."""
     scored: list[FactEvidence] = []
     seen: set[tuple[str, str, str]] = set()
     for f in store.facts_as_of_ranked(as_of):
@@ -184,6 +185,7 @@ def _score_facts(
 def _collect_bm25_chunks(
     store: "KnowledgeStore", question: str, as_of: str | None, top_k: int
 ) -> list[tuple["ChunkRecord", float]]:
+    """Retrieve BM25 snippet candidates for the question."""
     return list(store.search_as_of(question, as_of, top_k=top_k))
 
 
@@ -193,6 +195,7 @@ def _append_newsroom_chunks(
     as_of: str | None,
     chunk_hits: list,
 ) -> None:
+    """Boost newsroom articles into the chunk pool when branch or hours context applies."""
     seen_urls = {ch.url.rstrip("/") for ch, _ in chunk_hits}
     for ch, sc in store.search_as_of(question, as_of, top_k=W.NEWSROOM_SEARCH_TOP):
         if "/newsroom/" not in ch.url.lower():
@@ -217,6 +220,7 @@ def _merge_list_facts(
     rate_q: bool,
     max_facts: int,
 ) -> list[FactEvidence]:
+    """For list/broad-rate questions, pull in all facts from hinted product pages."""
     for h in path_hints:
         for f in store.facts_as_of_ranked(as_of):
             if hint_matches_url(h, f.url):
@@ -242,6 +246,7 @@ def _inject_hint_pages(
     broad_rates: bool,
     rate_q: bool,
 ) -> None:
+    """Inject markdown chunks from path-hint pages (rate tables and card copy)."""
     for page in hint_pages:
         rel = max(hint_path_score(h, page.url, q_tokens) for h in path_hints) if path_hints else 0
         if list_q or broad_rates:
@@ -263,6 +268,7 @@ def _rank_chunks(
     branch_places: list[str],
     max_chunks: int,
 ) -> list[ChunkEvidence]:
+    """Apply stale weights, branch boosts, and path-hint ordering to chunk hits."""
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
         weight = ch.authority * (W.STALE_CHUNK_WEIGHT if (rate_q and ch.stale_for_rates) else 1.0)
@@ -290,6 +296,7 @@ def gather_evidence(
     max_facts: int = W.DEFAULT_MAX_FACTS,
     max_chunks: int = W.DEFAULT_MAX_CHUNKS,
 ) -> EvidencePack:
+    """Build fact and chunk evidence for one question at optional as_of."""
     store.finalize()
     list_q = is_list_question(question)
     broad_rates = is_broad_rate_question(question)

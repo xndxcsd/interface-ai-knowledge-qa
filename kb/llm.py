@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+import threading
 from typing import Any
 
 LLM_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "15"))
@@ -81,13 +81,20 @@ def llm_answer_from_evidence(
     question: str, evidence_block: str, as_of: str | None
 ) -> dict:
     wall = float(os.getenv("LLM_WALL_S", "20"))
-    ex = ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(_llm_call_once, question, evidence_block, as_of)
-    try:
-        return fut.result(timeout=wall)
-    except FuturesTimeout as e:
-        ex.shutdown(wait=False, cancel_futures=True)
-        raise TimeoutError("LLM wall-clock deadline exceeded") from e
-    finally:
-        if fut.done():
-            ex.shutdown(wait=False)
+    result: dict = {}
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            result["payload"] = _llm_call_once(question, evidence_block, as_of)
+        except BaseException as e:
+            errors.append(e)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(timeout=wall)
+    if worker.is_alive():
+        raise TimeoutError("LLM wall-clock deadline exceeded")
+    if errors:
+        raise errors[0]
+    return result["payload"]

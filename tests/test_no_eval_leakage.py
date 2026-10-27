@@ -14,6 +14,17 @@ ALLOW = frozenset(
         "%", "apy", "apr", "dupaco", "rate", "rates", "business", "personal",
         "rewards", "savings-account", "credit-cards", "checking-accounts",
         "personal/savings-account", "personal/credit-cards", "personal/checking-accounts",
+        "join.dupaco.com", "credit", "union", "visa", "checking", "savings", "home",
+        "market", "money", "boat", "branch", "hours", "lobby", "drive", "street",
+        "avenue", "mon", "fri", "thu", "tue", "wed", "model", "year",
+    }
+)
+COMMON = frozenset(
+    {
+        "what", "when", "where", "which", "who", "how", "does", "give", "provide",
+        "quote", "main", "named", "tell", "your", "our", "the", "and", "for",
+        "answer", "include", "about", "month", "certificate", "shared",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
     }
 )
 STRUCTURAL = re.compile(r"^(personal|business|connect|about)/[\w\-/]+$")
@@ -32,6 +43,48 @@ def _literals(path: Path) -> str:
     return "\n".join(parts).lower()
 
 
+def _whole_words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9'.-]+", text.lower()))
+
+
+def _tokens_from_must(raw: str) -> set[str]:
+    s = str(raw).strip()
+    out: set[str] = set()
+    low = s.lower()
+    if 4 <= len(low) <= 40 and " " not in low and low not in ALLOW and low not in COMMON:
+        out.add(low)
+    for m in re.finditer(r"\b\d{5,}\b", low):
+        out.add(m.group(0))
+    for m in re.finditer(r"\d{1,2}:\d{2}", low):
+        out.add(m.group(0))
+    for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
+        out.add(m.group(0).lower())
+    for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
+        out.add(m.group(0).lower())
+    for m in re.finditer(r"\b[A-Z][a-z]{5,}\b", s):
+        w = m.group(0).lower()
+        if w not in ALLOW | COMMON:
+            out.add(w)
+    return {t for t in out if t and t not in ALLOW and not STRUCTURAL.match(t)}
+
+
+def _tokens_from_question(q: str) -> set[str]:
+    out: set[str] = set()
+    for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", q):
+        phrase = m.group(0).lower()
+        if phrase not in ALLOW and not all(w in ALLOW | COMMON for w in phrase.split()):
+            out.add(phrase)
+    for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", q):
+        tok = m.group(0).lower()
+        if tok not in ALLOW:
+            out.add(tok)
+    for m in re.finditer(r"\b([A-Z][a-z]{5,})\b", q):
+        w = m.group(1).lower()
+        if w not in ALLOW | COMMON:
+            out.add(w)
+    return {t for t in out if t not in ALLOW and t not in COMMON}
+
+
 def _banned_tokens() -> set[str]:
     out: set[str] = set()
     for path in EVAL_DIR.glob("*.jsonl"):
@@ -43,13 +96,20 @@ def _banned_tokens() -> set[str]:
                 val = item.get(key)
                 if isinstance(val, list):
                     for raw in val:
-                        s = str(raw).strip().lower()
-                        if len(s) >= 5 and s not in ALLOW:
-                            out.add(s)
+                        if raw:
+                            out |= _tokens_from_must(str(raw))
             exp = item.get("expected_answer")
-            if isinstance(exp, str) and len(exp.strip()) >= 16:
-                out.add(exp.strip().lower())
-    return out
+            if isinstance(exp, str) and exp.strip():
+                out |= _tokens_from_must(exp)
+            q = item.get("question")
+            if isinstance(q, str) and q.strip():
+                out |= _tokens_from_question(q)
+    return {
+        t
+        for t in out
+        if t not in ALLOW
+        and not (t in COMMON and " " not in t and "-" not in t and not any(c.isdigit() for c in t))
+    }
 
 
 def _question_ngrams(min_words: int = 4) -> set[str]:
@@ -72,11 +132,21 @@ def _question_ngrams(min_words: int = 4) -> set[str]:
 
 def _split_groups(banned: set[str]) -> list[tuple[str, ...]]:
     groups: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
     for tok in banned:
         if "-" in tok:
             parts = tuple(p for p in tok.split("-") if len(p) >= 3)
-            if len(parts) >= 2:
+            if len(parts) >= 2 and parts not in seen:
+                seen.add(parts)
                 groups.append(parts)
+        if tok.isalpha() and len(tok) >= 8 and tok not in ALLOW:
+            for i in range(3, len(tok) - 2):
+                parts = (tok[:i], tok[i:])
+                if any(p in ALLOW | COMMON for p in parts):
+                    continue
+                if len(parts[0]) >= 4 and len(parts[1]) >= 3 and parts not in seen:
+                    seen.add(parts)
+                    groups.append(parts)
     return groups
 
 
@@ -109,25 +179,46 @@ def _and_in_q_splits(path: Path, groups: list[tuple[str, ...]]) -> list[str]:
     return out
 
 
+def _has_whole_word(haystack: str, token: str) -> bool:
+    return re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", haystack) is not None
+
+
+def scan_path_for_literals(
+    path: Path,
+    banned: set[str],
+    groups: list[tuple[str, ...]],
+    ngrams: set[str],
+) -> list[str]:
+    """Return violation messages for one source file (used by tests and main scan)."""
+    violations: list[str] = []
+    lits = _literals(path)
+    words = _whole_words(lits)
+    for tok in banned:
+        if tok in ALLOW | COMMON or STRUCTURAL.match(tok):
+            continue
+        if len(tok) >= 4 and _has_whole_word(lits, tok):
+            violations.append(f"{path.name}: {tok!r}")
+        elif len(tok) >= 9 and tok.isdigit() and tok in lits:
+            violations.append(f"{path.name}: {tok!r}")
+    for ng in ngrams:
+        if _has_whole_word(lits, ng):
+            violations.append(f"{path.name}: n-gram {ng!r}")
+    for parts in groups:
+        if any(p in ALLOW | COMMON for p in parts):
+            continue
+        if all(_has_whole_word(lits, p) for p in parts):
+            violations.append(f"{path.name}: split {parts!r}")
+        elif all(p in words for p in parts):
+            violations.append(f"{path.name}: split-words {parts!r}")
+    violations.extend(_and_in_q_splits(path, groups))
+    return violations
+
+
 def test_no_eval_literals_in_kb_source():
     banned = _banned_tokens()
     ngrams = _question_ngrams()
     groups = _split_groups(banned)
     violations: list[str] = []
     for path in SCAN:
-        lits = _literals(path)
-        for tok in banned:
-            if tok in ALLOW or STRUCTURAL.match(tok):
-                continue
-            if len(tok) >= 6 and re.search(rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", lits):
-                violations.append(f"{path.name}: {tok!r}")
-        for ng in ngrams:
-            if re.search(rf"(?<![a-z0-9]){re.escape(ng)}(?![a-z0-9])", lits):
-                violations.append(f"{path.name}: n-gram {ng!r}")
-        for parts in groups:
-            if any(p in ALLOW for p in parts):
-                continue
-            if all(re.search(rf"(?<![a-z0-9]){re.escape(p)}(?![a-z0-9])", lits) for p in parts):
-                violations.append(f"{path.name}: split {parts!r}")
-        violations.extend(_and_in_q_splits(path, groups))
+        violations.extend(scan_path_for_literals(path, banned, groups, ngrams))
     assert not violations, "Eval leakage:\n" + "\n".join(sorted(set(violations)))

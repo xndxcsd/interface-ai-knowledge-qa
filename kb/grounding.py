@@ -320,6 +320,7 @@ def sanitize_refusal(answer: Answer) -> Answer:
 
 
 def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer:
+    """Refuse or rewrite answers whose numbers, times, or places are not in evidence."""
     if not answer.text:
         return Answer(text=REFUSAL, sources=[], confident=False)
 

@@ -16,6 +16,19 @@ def _num_key(val: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _value_signature(field: str, value: str) -> str | None:
+    """Single-number or APR-range signature for grouping conflicting values."""
+    v = normalize_value(value)
+    fl = field.lower()
+    nums = re.findall(r"(\d+(?:\.\d+)?)", v.replace(",", ""))
+    if "range" in fl or (len(nums) >= 2 and "%" in v):
+        if len(nums) >= 2:
+            return f"{nums[0]}-{nums[1]}"
+    if len(nums) == 1:
+        return nums[0]
+    return _num_key(v)
+
+
 def _is_rate_field(field: str, value: str) -> bool:
     f = field.lower()
     return "%" in value or "apy" in f or "apr" in f or "rate" in f or "dividend" in f
@@ -44,13 +57,13 @@ def detect_conflicts(
 
     out: list[dict] = []
     for key, members in groups.items():
-        by_num: dict[str, list[ExtractedFact]] = defaultdict(list)
+        by_sig: dict[str, list[ExtractedFact]] = defaultdict(list)
         for m in members:
-            nk = _num_key(m.value)
-            if nk:
-                by_num[nk].append(m)
+            sig = _value_signature(m.field, m.value)
+            if sig:
+                by_sig[sig].append(m)
 
-        if len(by_num) < 2:
+        if len(by_sig) < 2:
             continue
 
         cur = current_by_key.get(key)
