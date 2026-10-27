@@ -5,7 +5,8 @@ __pycache__/
 .DS_Store
 .env
 .env.*
-snapshots/*
-!snapshots/README.md
+snapshots/0*/
+snapshots/[!R]*
+snapshots/[0-9]*
 snapshots_zip/
 *.zip
