@@ -8,10 +8,24 @@ IMG_LINK = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 LINK = re.compile(r"\[([^\]]*)\]\([^)]+\)")
 HTML = re.compile(r"<[^>]+>")
 MULTISPACE = re.compile(r"\s+")
+DATA_URI = re.compile(r"data:[^)\s\"']+", re.I)
+SCRIPT_BLOCK = re.compile(r"<script[^>]*>.*?</script>", re.I | re.S)
+STYLE_BLOCK = re.compile(r"<style[^>]*>.*?</style>", re.I | re.S)
+SVG_BLOCK = re.compile(r"<svg[^>]*>.*?</svg>", re.I | re.S)
+
+
+def strip_non_content(md: str) -> str:
+    """Remove embedded assets and markup that pollute fact extraction."""
+    text = md or ""
+    text = SCRIPT_BLOCK.sub(" ", text)
+    text = STYLE_BLOCK.sub(" ", text)
+    text = SVG_BLOCK.sub(" ", text)
+    text = DATA_URI.sub(" ", text)
+    return text
 
 
 def clean_markdown(md: str) -> str:
-    text = md or ""
+    text = strip_non_content(md)
     text = IMG_LINK.sub(" ", text)
     text = LINK.sub(r"\1", text)
     text = HTML.sub(" ", text)

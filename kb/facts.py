@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from kb.authority import newest_effective_date
 from kb.normalize import normalize_value
-from kb.textutil import clean_markdown
 
 
 @dataclass(frozen=True)
@@ -114,16 +113,3 @@ def extract_table_facts(
                     )
             i += 1
     return facts
-
-
-def find_table_rows(markdown: str, needle: str) -> list[str]:
-    needle_l = needle.lower()
-    rows = []
-    for line in (markdown or "").splitlines():
-        if line.strip().startswith("|") and needle_l in line.lower():
-            rows.append(line)
-    return rows
-
-
-def page_text(markdown: str) -> str:
-    return clean_markdown(markdown)

@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 
 from kb.facts import ExtractedFact
+from kb.textutil import strip_non_content
 
 BRANCH_HEAD = re.compile(r"^#{1,4}\s+(.+)$", re.M)
-# Street, city, ST, ZIP (allows extra comma segments in the address line)
 ADDRESS = re.compile(
     r"^(\d[\d\sA-Za-z.\'-]+(?:,\s*[A-Za-z.\'\s]+)+,\s*[A-Z]{2},\s*\d{5})\s*$",
     re.M,
@@ -44,12 +44,12 @@ def extract_contact_facts(
     taken_on: str,
     authority: float,
 ) -> list[ExtractedFact]:
-    md = markdown or ""
+    md = strip_non_content(markdown or "")
     facts: list[ExtractedFact] = []
     seen: set[tuple[str, str, str]] = set()
 
     def add(subject: str, field: str, value: str, raw: str, section: str) -> None:
-        key = (subject, field, value)
+        key = (url, subject, field)
         if key in seen:
             return
         seen.add(key)
@@ -74,7 +74,8 @@ def extract_contact_facts(
         add(subj, "address", addr, addr, "locations")
 
     for m in US_PHONE.finditer(md):
-        add("Contact phone", "phone", m.group(0), m.group(0), "contact")
+        phone = m.group(0)
+        add(f"Phone {phone}", "phone", phone, phone, "contact")
 
     for m in ROUTING_LABELED.finditer(md):
         add("Routing", "routing number", m.group(1), m.group(0), "contact")
@@ -88,6 +89,7 @@ def extract_contact_facts(
     for m in TIME_RANGE.finditer(md):
         val = re.sub(r"\s+", " ", m.group(0)).strip()
         if len(val) >= 10:
-            add(_nearest_heading(md, m.start()), "hours", val, val, "hours")
+            subj = _nearest_heading(md, m.start())
+            add(subj, "hours", val, val, "hours")
 
     return facts

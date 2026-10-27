@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from kb.evidence import format_evidence_for_prompt, gather_evidence
 from kb.llm import get_llm_client, llm_answer_from_evidence
-from kb.postcheck import postcheck_answer
+from kb.grounding import postcheck_answer
 from kb.rules_answer import rules_answer
 
 

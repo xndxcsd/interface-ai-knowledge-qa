@@ -41,9 +41,6 @@ class KnowledgeStore:
     snapshots: list[tuple[str, str]] = field(default_factory=list)  # id, taken_on
     pages: list[PageVersion] = field(default_factory=list)
     facts: list[ExtractedFact] = field(default_factory=list)
-    chunks: list[ChunkRecord] = field(default_factory=list)
-    _chunk_tokens: list[list[str]] = field(default_factory=list)
-    _bm25: BM25Index | None = None
     _bm25_by_asof: dict[str, tuple[list[ChunkRecord], BM25Index]] = field(
         default_factory=dict
     )
@@ -92,7 +89,6 @@ class KnowledgeStore:
     def finalize(self) -> None:
         if self._finalized:
             return
-        self._build_latest_index()
         self._conflicts_raw = detect_conflicts(
             [f for f in self.facts if f.authority >= 0.9],
             current_facts=self.facts_for_conflicts(None),
@@ -113,31 +109,6 @@ class KnowledgeStore:
                 continue
             by_url[pv.canonical] = pv
         return by_url
-
-    def _build_latest_index(self) -> None:
-        corpus = self.corpus_as_of(None, for_rates=False)
-        self.chunks = []
-        self._chunk_tokens = []
-        cid = 0
-        for page in corpus:
-            for ch in split_chunks(page.markdown):
-                text = clean_markdown(ch)
-                if len(text) < 40:
-                    continue
-                self.chunks.append(
-                    ChunkRecord(
-                        chunk_id=cid,
-                        text=text,
-                        url=page.url,
-                        snapshot_id=page.snapshot_id,
-                        taken_on=page.taken_on,
-                        authority=page.authority,
-                        stale_for_rates=page.stale_for_rates,
-                    )
-                )
-                self._chunk_tokens.append(tokenize(text))
-                cid += 1
-        self._bm25 = BM25Index(self._chunk_tokens)
 
     def _cutoff(self, as_of: str | None) -> str | None:
         if not as_of:
@@ -241,20 +212,6 @@ class KnowledgeStore:
 
     def facts_as_of_ranked(self, as_of: str | None) -> list[ExtractedFact]:
         return self._facts_as_of(as_of)
-
-    def facts_matching(
-        self, as_of: str | None, subject_contains: str = "", url_fragment: str = ""
-    ) -> list[ExtractedFact]:
-        sub = subject_contains.lower()
-        frag = url_fragment.lower()
-        out = []
-        for f in self._facts_as_of(as_of):
-            if sub and sub not in f.subject.lower():
-                continue
-            if frag and frag not in f.url.lower():
-                continue
-            out.append(f)
-        return out
 
     def conflicts_raw(self) -> list[dict]:
         self.finalize()

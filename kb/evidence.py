@@ -107,7 +107,7 @@ def gather_evidence(
     store.finalize()
     list_q = is_list_question(question)
     if list_q:
-        max_facts, max_chunks = 22, 6
+        max_facts, max_chunks = 36, 8
 
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
@@ -150,11 +150,12 @@ def gather_evidence(
             hint_pages.append(page)
 
     if list_q:
-        for page in hint_pages:
+        for h in path_hints:
             for f in store.facts_as_of_ranked(as_of):
-                if normalize_url_match(page.url, f.url):
-                    s = score_fact(f, q_tokens, question, rate_question=rate_q) + 0.6
+                if h in f.url.lower():
+                    s = score_fact(f, q_tokens, question, rate_question=rate_q) + 0.65
                     scored_facts.append(FactEvidence(f, s))
+        for page in hint_pages:
             _inject_page_chunks(page, chunk_hits, extra=True)
         seen_f = set()
         merged: list[FactEvidence] = []

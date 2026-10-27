@@ -29,6 +29,7 @@ def canonical_path_hints(question: str) -> list[str]:
         (("checking",), "personal/checking-accounts"),
         (("mortgage", "home loan", "refinance"), "personal/loans/home-loans"),
         (("auto", "motorcycle", "vehicle"), "personal/loans/auto-motorcycle-loans"),
+        (("boat", "rv", "recreational"), "personal/loans/recreational-loans"),
         (("personal loan",), "personal/loans/personal-loans"),
         (("routing", "aba"), "business/cash-management"),
         (("branch", "lobby", "drive", "atm", "locator", "address"), "contact"),
