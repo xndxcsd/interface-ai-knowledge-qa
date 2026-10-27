@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Protocol
 
 LLM_TIMEOUT_S = float(os.getenv("OPENAI_TIMEOUT_S", "15"))
@@ -20,6 +21,7 @@ class OpenAIChatClient:
         self._client = OpenAI(
             api_key=os.environ["OPENAI_API_KEY"],
             timeout=LLM_TIMEOUT_S,
+            max_retries=0,
         )
         self._model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
@@ -70,9 +72,7 @@ def _parse_llm_json(raw: str) -> dict:
     return json.loads(raw)
 
 
-def llm_answer_from_evidence(
-    question: str, evidence_block: str, as_of: str | None
-) -> dict:
+def _llm_call_once(question: str, evidence_block: str, as_of: str | None) -> dict:
     as_of_line = (
         f"Answer as the website stood on {as_of} (evidence at or before that date)."
         if as_of
@@ -81,11 +81,16 @@ def llm_answer_from_evidence(
     user = f"{as_of_line}\n\nQuestion: {question}\n\n{evidence_block}"
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     client = OpenAIChatClient(model=model)
-    last_err: Exception | None = None
-    for _ in range(2):
+    raw = client.complete(SYSTEM_PROMPT, user)
+    return _parse_llm_json(raw)
+
+
+def llm_answer_from_evidence(
+    question: str, evidence_block: str, as_of: str | None
+) -> dict:
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_llm_call_once, question, evidence_block, as_of)
         try:
-            raw = client.complete(SYSTEM_PROMPT, user)
-            return _parse_llm_json(raw)
-        except Exception as e:
-            last_err = e
-    raise last_err or RuntimeError("LLM call failed")
+            return fut.result(timeout=float(os.getenv("LLM_WALL_S", "20")))
+        except FuturesTimeout as e:
+            raise TimeoutError("LLM wall-clock deadline exceeded") from e

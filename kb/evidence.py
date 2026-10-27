@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from kb.retrieval_hints import (
     canonical_path_hints,
+    expand_list_path_hints,
     is_broad_rate_question,
     is_hours_question,
     is_list_question,
@@ -146,7 +147,7 @@ def gather_evidence(
 
     q_tokens = _question_tokens(question)
     rate_q = is_rate_question(question)
-    path_hints = canonical_path_hints(question)
+    path_hints = expand_list_path_hints(canonical_path_hints(question), question)
     if rate_q and path_hints and not list_q:
         max_facts = max(max_facts, 16)
 
@@ -180,7 +181,20 @@ def gather_evidence(
         return scored[:max_facts]
 
     def search_chunks():
-        return store.search_as_of(question, as_of, top_k=max_chunks * 2)
+        return store.search_as_of(question, as_of, top_k=max(max_chunks * 3, 15))
+
+    def _append_newsroom_chunks(chunk_hits: list) -> None:
+        seen_urls = {ch.url.rstrip("/") for ch, _ in chunk_hits}
+        for ch, sc in store.search_as_of(question, as_of, top_k=30):
+            if "/newsroom/" not in ch.url.lower():
+                continue
+            key = ch.url.rstrip("/")
+            if key in seen_urls:
+                continue
+            seen_urls.add(key)
+            chunk_hits.append((ch, sc + 18.0))
+            if sum(1 for c, _ in chunk_hits if "/newsroom/" in c.url.lower()) >= 4:
+                break
 
     with ThreadPoolExecutor(max_workers=2) as ex:
         fut_f = ex.submit(score_all_facts)
@@ -189,9 +203,11 @@ def gather_evidence(
         chunk_hits = list(fut_c.result())
 
     hint_pages = []
+    seen_pages: set[str] = set()
     for h in path_hints:
         page = store.get_page(h, as_of, prefer_rates=not rate_q)
-        if page is not None:
+        if page is not None and page.url not in seen_pages:
+            seen_pages.add(page.url)
             hint_pages.append(page)
 
     if list_q or broad_rates:
@@ -202,7 +218,8 @@ def gather_evidence(
                     scored_facts.append(FactEvidence(f, s))
         for page in hint_pages:
             rel = max(_hint_path_score(h, page.url, q_tokens) for h in path_hints)
-            boost = 24.0 if rel > 0 else 2.0
+            is_card_list = list_q and "credit-cards" in page.url.lower()
+            boost = 24.0 if (rel > 0 or is_card_list) else 2.0
             _inject_page_chunks(page, chunk_hits, extra=True, inject_score=boost)
         seen_f = set()
         merged: list[FactEvidence] = []
@@ -225,6 +242,10 @@ def gather_evidence(
                     _inject_page_chunks(page, chunk_hits, extra=True, inject_score=24.0)
             else:
                 _inject_page_chunks(page, chunk_hits, extra=False)
+
+    if any("/newsroom/" in ch.url for ch, _ in chunk_hits) or not rate_q:
+        _append_newsroom_chunks(chunk_hits)
+        max_chunks = max(max_chunks, 8)
 
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:

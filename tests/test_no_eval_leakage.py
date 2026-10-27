@@ -176,7 +176,30 @@ def _tokens_from_question(raw: str) -> set[str]:
     for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
         out.add(m.group(0).lower())
     out |= _distinctive_proper_nouns(s)
+    low = s.lower()
+    for m in re.finditer(r"[a-z][a-z\s,'-]{8,}[a-z]", low):
+        phrase = re.sub(r"\s+", " ", m.group(0).strip())
+        if len(phrase.split()) >= 2 and len(phrase) >= 12:
+            out.add(phrase)
     return {t for t in out if t and t not in ALLOW}
+
+
+def _frozenset_string_literals(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    out: set[str] = set()
+
+    class V(ast.NodeVisitor):
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else ""
+            if name == "frozenset":
+                for elt in node.args[0].elts if node.args and isinstance(node.args[0], ast.Set) else []:
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                        out.add(elt.value.lower())
+            self.generic_visit(node)
+
+    V().visit(tree)
+    return out
 
 
 def _banned_from_eval() -> set[str]:
@@ -234,6 +257,14 @@ def scan_path_for_violations(path: Path, banned: set[str], split_groups: list[tu
     combined = lits + "\n" + comments
     words = _whole_words(combined)
     whole = path.read_text(encoding="utf-8").lower()
+    for tok in banned:
+        if " " in tok and len(tok) >= 12 and re.search(
+            rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", combined
+        ):
+            violations.append(f"{path.name}: question phrase {tok!r}")
+    for tok in _frozenset_string_literals(path):
+        if tok in banned and len(tok) >= 4:
+            violations.append(f"{path.name}: stopword {tok!r}")
     for tok in banned:
         if len(tok) >= 9 and tok.isdigit():
             if tok in whole:

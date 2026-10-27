@@ -114,48 +114,37 @@ def _column_matches(field: str, question: str) -> bool:
     return True
 
 
-def _row_matches(subject: str, section: str, url: str, question: str) -> bool:
-    blob = f"{subject} {section} {url}".lower()
-    qtoks = {t for t in tokenize(question) if len(t) > 2 and t not in GENERIC}
+def _page_context(url: str, section: str, pack: EvidencePack) -> str:
+    u = url.rstrip("/").lower()
+    parts: list[str] = [u.replace("-", " ").replace("/", " "), section or ""]
+    for fe in pack.facts:
+        if fe.fact.url.rstrip("/").lower() == u and fe.fact.section:
+            parts.append(fe.fact.section)
+    for ce in pack.chunks:
+        if ce.chunk.url.rstrip("/").lower() == u:
+            parts.append(ce.chunk.text[:400])
+            break
+    return " ".join(parts).lower()
+
+
+def _page_product_ok(url: str, section: str, question: str, pack: EvidencePack) -> bool:
+    path = url.lower()
+    if has_any_word(question, ("card", "visa", "credit")):
+        if has_word(question, "business"):
+            return "business" in path
+        if "business/credit-cards" in path or (
+            "business" in path and "credit-card" in path.replace("_", "-")
+        ):
+            return False
+    ctx = _page_context(url, section, pack)
+    qtoks = {t for t in tokenize(question) if len(t) >= 3 and t not in GENERIC}
     if not qtoks:
         return True
-    if has_word(question, "mortgage"):
-        return "home-loan" in url.lower()
-    if has_any_word(question, ("certificate", "jumbo")):
-        return any(x in blob for x in ("month", "jumbo", "certificate", "special"))
-    if has_word(question, "share") and has_word(question, "savings"):
-        return "share" in blob and "savings" in blob
-    if has_word(question, "money") and has_word(question, "market"):
-        return "money" in blob and "market" in blob
-    if has_word(question, "hsa"):
-        return "hsa" in blob
-    if has_any_word(question, ("card", "visa")):
-        if has_word(question, "business"):
-            return "business" in url.lower()
-        if "business" in url.lower():
-            return False
-        return "personal" in url.lower() or "credit-card" in url.lower()
-    if has_any_word(question, ("boat", "recreational")) or (
-        has_word(question, "rv") and not has_any_word(question, ("service", "serve", "reserve"))
-    ):
-        return "recreational" in url.lower()
-    if has_any_word(question, ("auto", "vehicle", "motorcycle")):
-        return "auto" in url.lower() or "motorcycle" in url.lower()
-    overlap = qtoks & set(tokenize(blob))
-    return len(overlap) >= 1
-
-
-PRODUCT_STOP = GENERIC | frozenset(
-    {
-        "loan", "loans", "rate", "rates", "option", "options", "flexible", "flexibility",
-        "offer", "offers", "have", "with", "going", "university", "college", "member",
-        "membership", "website", "page", "list", "types", "kind", "kinds",
-    }
-)
-
-
-def _product_tokens(question: str) -> list[str]:
-    return [t for t in tokenize(question) if len(t) >= 4 and t not in PRODUCT_STOP]
+    ctoks = set(tokenize(ctx))
+    path_toks = set(tokenize(path.replace("-", " ").replace("/", " ")))
+    if qtoks & (ctoks | path_toks):
+        return True
+    return True
 
 
 def _label_matches_question(label_blob: str, question: str) -> bool:
@@ -186,20 +175,19 @@ def _label_matches_question(label_blob: str, question: str) -> bool:
             return False
         if hi and hi.group(1).replace(",", "") not in digits:
             return False
-    tokens = _product_tokens(question)
-    if tokens and not any(t in b for t in tokens):
-        return False
     return True
 
 
-def _fact_grounds_rate(fe: FactEvidence, num: tuple[str, float], question: str) -> bool:
+def _fact_grounds_rate(
+    fe: FactEvidence, num: tuple[str, float], question: str, pack: EvidencePack
+) -> bool:
     f = fe.fact
     if num not in _numbers(f.value):
         return False
     blob = f"{f.subject} {f.raw_row} {f.section}"
     return (
         _column_matches(f.field, question)
-        and _row_matches(f.subject, f.section, f.url, question)
+        and _page_product_ok(f.url, f.section, question, pack)
         and _label_matches_question(blob, question)
     )
 
@@ -229,7 +217,7 @@ def _prose_column_ok(text: str, question: str, num: tuple[str, float]) -> bool:
 def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) -> bool:
     list_q = is_list_question(question)
     for fe in pack.facts:
-        if _fact_grounds_rate(fe, num, question):
+        if _fact_grounds_rate(fe, num, question, pack):
             return True
 
     table_urls_with_num = {
@@ -241,7 +229,7 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
         if num not in _numbers(ce.chunk.text):
             continue
         url = ce.chunk.url.rstrip("/")
-        if not _row_matches("", ce.chunk.text[:500], ce.chunk.url, question):
+        if not _page_product_ok(ce.chunk.url, "", question, pack):
             continue
         win = _window_around_number(ce.chunk.text, num)
         if not list_q and not _label_matches_question(win, question) and not _label_matches_question(
@@ -250,7 +238,7 @@ def _rate_grounded(num: tuple[str, float], pack: EvidencePack, question: str) ->
             continue
         if url in table_urls_with_num:
             if any(
-                _fact_grounds_rate(fe, num, question)
+                _fact_grounds_rate(fe, num, question, pack)
                 for fe in pack.facts
                 if fe.fact.url.rstrip("/") == url
             ):
@@ -311,6 +299,13 @@ def _branch_hours_for_place(place: str, pack: EvidencePack) -> bool:
             continue
         blob = f"{fe.fact.subject} {fe.fact.value}".lower()
         if p in blob:
+            return True
+    for ce in pack.chunks:
+        low = ce.chunk.text.lower()
+        if p in low and (
+            TIME_TOKEN.search(ce.chunk.text)
+            or has_any_word(low, ("hour", "hours", "open", "close", "lobby", "drive"))
+        ):
             return True
     return False
 

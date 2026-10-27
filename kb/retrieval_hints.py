@@ -52,7 +52,6 @@ def canonical_path_hints(question: str) -> list[str]:
         (("branch", "lobby", "atm", "locator", "address"), "contact"),
         (("join", "membership", "eligible"), "about/join"),
         (("wallet", "mobile"), "connect/online-and-mobile-banking"),
-        (("student", "college"), "personal/loans/personal-loans"),
         (("savings",), "personal/savings-account"),
     )
     for keys, path in pairs:
@@ -64,6 +63,25 @@ def canonical_path_hints(question: str) -> list[str]:
         hints.append("personal/savings-account")
     if _has(q, "rv") and not _has(q, "service"):
         hints.append("personal/loans/recreational-loans")
+    seen: set[str] = set()
+    out: list[str] = []
+    for h in hints:
+        if h not in seen:
+            seen.add(h)
+            out.append(h)
+    return out
+
+
+def expand_list_path_hints(path_hints: list[str], question: str) -> list[str]:
+    """For list questions, include every page in a product family (e.g. both card pages)."""
+    if not is_list_question(question):
+        return path_hints
+    q = question.lower()
+    hints = list(path_hints)
+    if re.search(r"\bcredit\s+cards?\b", q) or _has_any(q, ("card", "visa")):
+        for p in ("personal/credit-cards", "business/credit-cards"):
+            if p not in hints:
+                hints.append(p)
     seen: set[str] = set()
     out: list[str] = []
     for h in hints:

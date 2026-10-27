@@ -4,6 +4,8 @@ from __future__ import annotations
 import re
 
 from kb.evidence import EvidencePack, is_rate_question
+from kb.retrieval_hints import is_list_question
+from kb.textutil import has_word
 
 
 def _src(url, snapshot_id, quote=None):
@@ -22,21 +24,7 @@ IDK = "I don't know — I couldn't find that on the website based on the availab
 
 
 def _wants_list(question: str) -> bool:
-    q = question.lower()
-    return any(
-        w in q
-        for w in (
-            "all ",
-            "list",
-            "each",
-            "what are the",
-            "what cards",
-            "rates for",
-            "every",
-            "provide",
-            "tell me the rates",
-        )
-    )
+    return is_list_question(question)
 
 
 def rules_answer(question: str, pack: EvidencePack) -> "Answer":
@@ -60,7 +48,7 @@ def rules_answer(question: str, pack: EvidencePack) -> "Answer":
             return _ans(IDK, [], confident=False)
 
     sources = []
-    if _wants_list(question) or (rate_q and "certificate" in question.lower()):
+    if _wants_list(question) or (rate_q and has_word(question, "certificate")):
         lines = []
         for fe in auth_facts[:14]:
             f = fe.fact
