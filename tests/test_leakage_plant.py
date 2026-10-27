@@ -1,10 +1,16 @@
 """Distinctive eval gold tokens and planted phrases must be in the banned set / caught."""
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
-from tests.test_no_eval_leakage import SCAN, _literals_in_python, _banned_from_eval
+from tests.test_no_eval_leakage import (
+    SCAN,
+    _banned_from_eval,
+    _literals_in_python,
+    token_in_banned,
+)
 
 
 def test_distinctive_gold_tokens_are_banned():
@@ -17,11 +23,9 @@ def test_distinctive_gold_tokens_are_banned():
         "fifth",
         "join.dupaco.com",
         "galena branch",
-        "6 p.m.",
+        "hy-vee",
     ):
-        assert any(tok in b or b in tok for b in banned), (
-            f"expected eval gold token {tok!r} in banned set"
-        )
+        assert token_in_banned(tok, banned), f"expected eval gold token {tok!r} in banned set"
 
 
 def test_planted_literals_in_source_would_fail():
@@ -30,7 +34,9 @@ def test_planted_literals_in_source_would_fail():
         "8 a.m.",
         "fifth",
         "join.dupaco.com",
+        "Forbes fifth time",
     ]
+    banned = _banned_from_eval()
     for plant in plants:
         with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
             f.write(f'X = "{plant}"\n')
@@ -38,5 +44,4 @@ def test_planted_literals_in_source_would_fail():
         lits = _literals_in_python(path)
         path.unlink(missing_ok=True)
         assert plant.lower() in lits, plant
-        banned = _banned_from_eval()
-        assert any(plant.lower() in b or b in plant.lower() for b in banned), plant
+        assert token_in_banned(plant, banned), plant

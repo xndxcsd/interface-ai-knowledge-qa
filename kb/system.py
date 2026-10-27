@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from kb.authority import authority_score, is_likely_stale_for_rates, normalize_url
 from kb.conflicts import detect_conflicts
 from kb.contact_extract import extract_contact_facts
+from kb.hours_extract import extract_hours_facts
 from kb.facts import ExtractedFact, extract_table_facts
 from kb.normalize import fact_key
 from kb.retrieve import BM25Index
@@ -68,6 +69,15 @@ class KnowledgeStore:
             self.pages.append(pv)
             self.facts.extend(
                 extract_table_facts(
+                    p.markdown,
+                    url=p.url,
+                    snapshot_id=sid,
+                    taken_on=taken,
+                    authority=auth,
+                )
+            )
+            self.facts.extend(
+                extract_hours_facts(
                     p.markdown,
                     url=p.url,
                     snapshot_id=sid,

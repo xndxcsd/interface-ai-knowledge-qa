@@ -20,12 +20,6 @@ ROUTING_LABELED = re.compile(
     re.I,
 )
 ROUTING_BARE = re.compile(r"\b(\d{9})\b")
-TIME_RANGE = re.compile(
-    r"(?:Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)"
-    r"[^.\n]{0,120}?\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)"
-    r"[^.\n]{0,80}?\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)?",
-    re.I,
-)
 
 
 def _nearest_heading(md: str, pos: int) -> str:
@@ -89,12 +83,5 @@ def extract_contact_facts(
         ctx = md[start : m.end() + 10].lower()
         if "routing" in ctx or "aba" in ctx:
             add("Routing", "routing number", m.group(1), m.group(0), "contact")
-
-    for m in TIME_RANGE.finditer(md):
-        val = re.sub(r"\s+", " ", m.group(0)).strip()
-        if len(val) >= 10:
-            heading = _nearest_heading(md, m.start())
-            subj = f"{heading} — {val[:40]}"
-            add(subj, "hours", val, val, "hours")
 
     return facts

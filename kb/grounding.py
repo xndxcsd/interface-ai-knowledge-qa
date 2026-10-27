@@ -1,4 +1,4 @@
-"""Strict-but-simple grounding: tokens in the answer must appear in retrieved evidence."""
+"""Grounding: answer tokens must appear in retrieved evidence; rates match labeled rows."""
 from __future__ import annotations
 
 import re
@@ -25,12 +25,15 @@ STREET = re.compile(
     re.I,
 )
 ZIP = re.compile(r"\b\d{5}\b")
-NAMED_BRANCH = re.compile(
-    r"(?<!\w)([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)\s+"
-    r"(?:Branch|branch|Avenue|Street|St\.|Blvd\.|Road|Rd\.)\b"
-    r"|(?:branch|lobby)\s+(?:for|at|on)\s+(?:the\s+)?([A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)",
-)
 REFUSAL = "I don't know."
+
+GENERIC = frozenset(
+    {
+        "what", "the", "is", "are", "do", "does", "for", "on", "to", "you", "your",
+        "dupaco", "rate", "rates", "loan", "loans", "account", "current", "right",
+        "now", "tell", "give", "provide", "much", "many", "any", "can", "could",
+    }
+)
 
 
 def _numbers(text: str) -> set[tuple[str, float]]:
@@ -50,10 +53,6 @@ def evidence_corpus(pack: EvidencePack) -> str:
     for ce in pack.chunks:
         parts.extend([ce.chunk.url, ce.chunk.text])
     return "\n".join(parts)
-
-
-def _value_in_corpus(num: tuple[str, float], corpus: str) -> bool:
-    return num in _numbers(corpus)
 
 
 def _norm_time(s: str) -> str:
@@ -87,9 +86,7 @@ def _url_in_corpus(url: str, corpus: str) -> bool:
         cl = corpus.lower()
         if host_path.lower() in cl:
             return True
-        if (p.netloc.removeprefix("www.") + p.path).lower() in cl:
-            return True
-        bare = host_path if host_path.startswith("dupaco") else f"dupaco.com{p.path.rstrip('/')}"
+        bare = f"dupaco.com{p.path.rstrip('/')}"
         if bare.lower() in cl:
             return True
     except Exception:
@@ -97,34 +94,102 @@ def _url_in_corpus(url: str, corpus: str) -> bool:
     return False
 
 
-def _explicit_location_names(question: str) -> list[str]:
-    names: list[str] = []
-    for m in NAMED_BRANCH.finditer(question):
-        g = m.group(1) or m.group(2)
-        if g and g.lower() not in ("dupaco",):
-            names.append(g.lower())
-    return names
+def _column_matches(field: str, question: str) -> bool:
+    f = field.lower()
+    q = question.lower()
+    if re.search(r"\bapy\b|\byield\b", q):
+        return "apy" in f or "yield" in f
+    if re.search(r"\bapr\b", q):
+        return "apr" in f or "annual percentage rate" in f
+    if "dividend" in q and "apy" not in q:
+        return "dividend" in f
+    if re.search(r"\brate\b", q) and "interest rate" in q:
+        return any(x in f for x in ("rate", "apy", "apr", "dividend", "yield"))
+    return True
+
+
+def _row_matches(subject: str, section: str, url: str, question: str) -> bool:
+    q = question.lower()
+    blob = f"{subject} {section} {url}".lower()
+    qtoks = {t for t in tokenize(question) if len(t) > 2 and t not in GENERIC}
+    if not qtoks:
+        return True
+    if "mortgage" in qtoks or "mortgage" in q:
+        return "home-loan" in url.lower()
+    if "certificate" in q or " jumbo" in q or "10-month" in q or "10 month" in q:
+        if any(x in q for x in ("jumbo", "10 month", "10-month", "certificate")):
+            return any(x in blob for x in ("month", "jumbo", "certificate", "special"))
+    if "share" in q and "savings" in q:
+        return "share" in blob and "savings" in blob
+    if "money market" in q:
+        return "money" in blob and "market" in blob
+    if "hsa" in q:
+        return "hsa" in blob
+    if any(x in q for x in ("bright", "launchpad")) or ("jump" in q and "start" in q):
+        if "bright" in q and "bright" in blob:
+            return True
+        if "jump" in q and "start" in q and "jump" in blob:
+            return True
+        if "launchpad" in q and "launchpad" in blob:
+            return True
+        return False
+    if "card" in q or "visa" in q:
+        if "business" in q:
+            return "business" in url.lower()
+        if "business" in url.lower():
+            return False
+        return "personal" in url.lower() or "credit-card" in url.lower()
+    if any(x in q for x in ("rewards", "platinum")) and "card" in q:
+        name = "rewards" if "rewards" in q else "platinum"
+        return name in blob
+    if any(x in q for x in ("boat", "recreational")):
+        return "recreational" in url.lower()
+    if any(x in q for x in ("auto", "vehicle", "motorcycle")):
+        return "auto" in url.lower() or "motorcycle" in url.lower()
+    overlap = qtoks & set(tokenize(blob))
+    return len(overlap) >= 1
+
+
+def _rate_in_labeled_row(num: tuple[str, float], pack: EvidencePack, question: str) -> bool:
+    for fe in pack.facts:
+        if num not in _numbers(fe.fact.value):
+            continue
+        f = fe.fact
+        if not _column_matches(f.field, question):
+            continue
+        if _row_matches(f.subject, f.section, f.url, question):
+            return True
+    return False
 
 
 def _refuse(answer: Answer) -> Answer:
     return Answer(text=REFUSAL, sources=answer.sources, confident=False)
 
 
+def sanitize_refusal(answer: Answer) -> Answer:
+    """Refusals must not contain numbers (harness should_refuse scoring)."""
+    if answer.confident:
+        return answer
+    if _numbers(answer.text) or re.search(r"\b\d+\s*months?\b", answer.text, re.I):
+        return Answer(text=REFUSAL, sources=[], confident=False)
+    if answer.text and answer.text.strip().lower() != REFUSAL.lower():
+        low = answer.text.lower()
+        if any(x in low for x in ("don't know", "do not know", "not sure", "couldn't find")):
+            return Answer(text=REFUSAL, sources=[], confident=False)
+    return answer
+
+
 def apply_grounding(answer: Answer, pack: EvidencePack, question: str) -> Answer:
+    answer = sanitize_refusal(answer)
     if not answer.text:
         return Answer(text=REFUSAL, sources=[], confident=False)
 
     corpus = evidence_corpus(pack)
     text = answer.text
 
-    for name in _explicit_location_names(question):
-        if name not in corpus.lower() and name.replace("-", " ") not in corpus.lower():
-            if any(k in question.lower() for k in ("branch", "lobby", "hours", "address", "street")):
-                return _refuse(answer)
-
     if is_rate_question(question):
         for n in _numbers(text):
-            if n[0] == "%" and not _value_in_corpus(n, corpus):
+            if n[0] == "%" and not _rate_in_labeled_row(n, pack, question):
                 return _refuse(answer)
 
     for m in PHONE.finditer(text):

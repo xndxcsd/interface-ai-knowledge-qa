@@ -4,9 +4,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "harness"))
 from contract import Answer  # noqa: E402
 
-from kb.evidence import EvidencePack
+from kb.evidence import EvidencePack, FactEvidence
 from kb.facts import ExtractedFact
-from kb.grounding import apply_grounding
+from kb.grounding import apply_grounding, sanitize_refusal
 
 
 def test_rejects_ungrounded_rate():
@@ -19,8 +19,8 @@ def test_rejects_ungrounded_rate():
 def test_allows_grounded_auto_rate():
     f = ExtractedFact(
         subject="2024-27 Model Year | 60 Months",
-        field="APR",
-        value="5.39%",
+        field="Annual Percentage Rate (As Low As)",
+        value="5.39% APR1",
         raw_row="| 2024-27 | 60 | 5.39% |",
         section="Rates",
         effective_date=None,
@@ -29,8 +29,6 @@ def test_allows_grounded_auto_rate():
         taken_on="2026-09-28",
         authority=1.0,
     )
-    from kb.evidence import FactEvidence
-
     pack = EvidencePack(facts=[FactEvidence(f, 1.0)], chunks=[], as_of=None)
     ans = Answer(text="5.39% APR for 60 months.", sources=[], confident=True)
     out = apply_grounding(
@@ -39,3 +37,33 @@ def test_allows_grounded_auto_rate():
         "What is the APR on a 60-month auto loan for a 2026 model year vehicle?",
     )
     assert out.confident
+
+
+def test_rejects_wrong_column_for_apy_question():
+    f = ExtractedFact(
+        subject="10 Month Fixed Jumbo Certificate Special",
+        field="Dividend Rate",
+        value="3.86%",
+        raw_row="| ... |",
+        section="Certs",
+        effective_date=None,
+        url="https://www.example.com/personal/savings-account",
+        snapshot_id="s1",
+        taken_on="2026-05-12",
+        authority=1.0,
+    )
+    pack = EvidencePack(facts=[FactEvidence(f, 1.0)], chunks=[], as_of=None)
+    ans = Answer(text="The APY is 3.86%.", sources=[], confident=True)
+    out = apply_grounding(
+        ans,
+        pack,
+        "What APY did the 10-month jumbo certificate special pay as of May 2026?",
+    )
+    assert not out.confident
+
+
+def test_sanitize_refusal_strips_numbers():
+    ans = Answer(text="Not sure — month 11 or 12 months.", sources=[], confident=False)
+    out = sanitize_refusal(ans)
+    assert out.text == "I don't know."
+    assert not out.confident

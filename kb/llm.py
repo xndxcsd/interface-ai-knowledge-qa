@@ -44,6 +44,7 @@ SYSTEM_PROMPT = """You answer member questions using ONLY the evidence block.
 
 Rules:
 - Use the evidence row label (row=), column name, page URL, and section to pick the product/tier/term that matches the question.
+- If the question asks for APY or yield, use the APY/yield column—not dividend rate alone. If it asks APR, use the APR column.
 - Prefer the newest snapshot_id and highest-authority rows when rows disagree.
 - Quote numbers, times, phones, addresses, and URLs exactly as they appear in the evidence you use.
 - For broad list requests, include items from every relevant product page represented in the evidence.

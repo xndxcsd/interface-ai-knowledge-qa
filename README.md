@@ -4,7 +4,7 @@ Knowledge Q&A for the interface.ai hackathon kit: ingest five Dupaco website sna
 
 **Built with AI-assisted development** (see [NOTES.md](NOTES.md)).
 
-Requires **Python 3.11+** (tested on 3.11 and 3.13).
+Requires **Python 3.11+** (3.11+ works; tested on 3.11 and 3.13).
 
 ## Setup
 
@@ -19,7 +19,7 @@ pytest
 
 ## Snapshots (not in git)
 
-Place the participant kit **`snapshots_zip/`** directory in the repo root (gitignored). The harness loads snapshots from that folder by default. See [snapshots/README.md](snapshots/README.md).
+Place the participant kit **`snapshots_zip/`** directory at the repo root (gitignored). On the **first run**, the harness unpacks those zips into **`./snapshots/`** (default `--snapshots` path). See [snapshots/README.md](snapshots/README.md).
 
 ```bash
 python3 harness/run_eval.py --submission . --eval eval/public_eval.jsonl --out results/public

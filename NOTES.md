@@ -5,7 +5,7 @@
 1. **Page versions** — For each canonical URL, only the **latest snapshot at or before `as_of`** contributes facts and BM25 chunks.
 2. **Fact keys** — `(url, subject, field)` after normalization (contact rows use distinct subjects per address ZIP or hours text).
 3. **Authority** — Official product pages beat blogs and `info.dupaco.com`.
-4. **Contact** — Regex extraction on `/contact` after stripping SVG/data-URI noise.
+4. **Contact / hours** — Addresses and phones on `/contact`; **hours** regex runs on any page whose markdown mentions drive-up, lobby, or branch hours (e.g. newsroom articles).
 
 ## Conflicts
 

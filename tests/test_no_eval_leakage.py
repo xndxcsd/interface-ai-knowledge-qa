@@ -13,8 +13,44 @@ EVAL_DIR = ROOT / "eval"
 SCAN = [ROOT / "solution.py", *sorted((ROOT / "kb").glob("*.py"))]
 STRUCTURAL = re.compile(r"^(personal|business|connect|about)/[\w\-/]+$")
 ALLOW = frozenset(
-    {"%", "apy", "apr", "dupaco", "rate", "rates", "business", "student", "platinum", "rewards"}
+    {
+        "%",
+        "apy",
+        "apr",
+        "dupaco",
+        "rate",
+        "rates",
+        "business",
+        "student",
+        "platinum",
+        "rewards",
+        "savings-account",
+        "credit-cards",
+        "checking-accounts",
+        "personal",
+        "business",
+    }
 )
+def token_in_banned(needle: str, banned: set[str]) -> bool:
+    n = re.sub(r"\s+", " ", needle.lower().strip())
+    for word in re.findall(r"[a-z0-9'.-]+", n):
+        if word in banned and len(word) >= 4:
+            return True
+    for b in banned:
+        bl = b.lower()
+        if n == bl:
+            return True
+        if " " in n and n in bl:
+            return True
+        if " " in bl and bl in n:
+            return True
+        if re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", bl):
+            return True
+        if re.search(rf"(?<![a-z0-9]){re.escape(bl)}(?![a-z0-9])", n):
+            return True
+    return False
+
+
 TIME_RANGE = re.compile(
     r"\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)\s*[-–—]\s*"
     r"\d{1,2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)",
@@ -53,12 +89,7 @@ def _tokens_from_must_token(raw: str) -> set[str]:
     low = s.lower()
     if not low:
         return out
-    if (
-        any(c.isdigit() for c in low)
-        or "dupaco.com" in low
-        or " " in low
-        or len(low) >= 12
-    ):
+    if len(low) >= 4:
         out.add(low)
     for m in re.finditer(r"\d+\.\d+", low):
         out.add(m.group(0))
@@ -75,6 +106,8 @@ def _tokens_from_must_token(raw: str) -> set[str]:
         if "join." in low:
             out.add("join.dupaco.com")
     for m in re.finditer(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", s):
+        out.add(m.group(0).lower())
+    for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
         out.add(m.group(0).lower())
     return {t for t in out if t and not STRUCTURAL.match(t) and t not in ALLOW}
 
@@ -99,6 +132,8 @@ def _tokens_from_question(raw: str) -> set[str]:
         out.add(m.group(0).lower())
     for m in TIME_RANGE.finditer(s):
         out.add(re.sub(r"\s+", " ", m.group(0).lower()))
+    for m in re.finditer(r"\b[A-Za-z]+(?:-[A-Za-z]+)+\b", s):
+        out.add(m.group(0).lower())
     return {t for t in out if t and t not in ALLOW}
 
 

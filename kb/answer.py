@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from kb.evidence import format_evidence_for_prompt, gather_evidence
 from kb.llm import get_llm_client, llm_answer_from_evidence
-from kb.grounding import postcheck_answer
+from kb.grounding import postcheck_answer, sanitize_refusal
 from kb.rules_answer import rules_answer
 
 
@@ -48,10 +48,12 @@ def answer_question(store, question: str, as_of: str | None = None):
             text = str(parsed.get("text") or "").strip() or "I don't know."
             confident = bool(parsed.get("confident", True))
             urls = parsed.get("source_urls") or []
-            ans = Answer(
-                text=text,
-                sources=_sources_from_urls(pack, urls),
-                confident=confident,
+            ans = sanitize_refusal(
+                Answer(
+                    text=text,
+                    sources=_sources_from_urls(pack, urls),
+                    confident=confident,
+                )
             )
             out = postcheck_answer(ans, pack, question)
             if os.getenv("KB_LOG_LLM"):

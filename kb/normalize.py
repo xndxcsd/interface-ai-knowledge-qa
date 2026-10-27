@@ -29,6 +29,8 @@ def _collapse_dollar_spacing(s: str) -> str:
 
 def normalize_subject(subject: str) -> str:
     s = _collapse_dollar_spacing(subject or "")
+    s = re.sub(r"(\d)(or\s+less\b)", r"\1 \2", s, flags=re.I)
+    s = re.sub(r"\$(\d{5,})([a-z])", r"$\1 \2", s, flags=re.I)
     s = s.lower().strip()
     s = re.sub(r"[^a-z0-9$+./\-–—]+", " ", s)
     return " ".join(s.split())

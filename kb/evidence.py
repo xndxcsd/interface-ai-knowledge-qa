@@ -6,7 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from kb.retrieval_hints import canonical_path_hints, is_broad_rate_question, is_list_question
+from kb.retrieval_hints import (
+    canonical_path_hints,
+    is_broad_rate_question,
+    is_hours_question,
+    is_list_question,
+)
 from kb.textutil import tokenize
 
 if TYPE_CHECKING:
@@ -59,8 +64,13 @@ def score_fact(
     for m in re.finditer(r"\$?\d[\d,]*", question):
         if m.group(0).replace(",", "") in blob.replace(",", ""):
             bonus += 0.2
-    if f.field.lower() in ("address", "phone", "routing number", "lobby or drive-up"):
+    if f.field.lower() in ("address", "phone", "routing number", "hours"):
         bonus += 0.15
+    ql = question.lower()
+    if f.field.lower() == "hours" and is_hours_question(question):
+        bonus += 0.85
+        if "drive" in ql and "drive" in f.value.lower():
+            bonus += 0.5
     return (overlap + bonus) * auth
 
 
@@ -169,6 +179,25 @@ def gather_evidence(
     else:
         for page in hint_pages:
             _inject_page_chunks(page, chunk_hits)
+
+    ql = question.lower()
+    if any(k in ql for k in ("forbes", "volunteer", "branch offices", "physical branch")) or (
+        "hy" in ql and "vee" in ql
+    ):
+        corpus = store.corpus_as_of(as_of, for_rates=False)
+        news = sorted(
+            [p for p in corpus if "/newsroom/" in p.canonical.lower()],
+            key=lambda p: p.taken_on,
+            reverse=True,
+        )
+        for page in news[:5]:
+            _inject_page_chunks(page, chunk_hits, extra=True)
+
+    if is_hours_question(question):
+        for f in store.facts_as_of_ranked(as_of):
+            if f.field.lower() == "hours":
+                s = score_fact(f, q_tokens, question, rate_question=rate_q) + 1.2
+                scored_facts.append(FactEvidence(f, s))
 
     chunks: list[ChunkEvidence] = []
     for ch, bm25_score in chunk_hits:
